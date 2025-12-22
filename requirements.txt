@@ -1,0 +1,36 @@
+# Janet Core Dependencies
+psutil>=5.9.0
+pyyaml>=6.0
+cryptography>=41.0.0
+chromadb>=0.4.0
+# Note: ChromaDB may require additional dependencies on some systems
+numpy>=1.24.0
+pytest>=7.4.0
+
+# Voice (Day 2) - Optional
+# Note: sounddevice requires PortAudio system library
+# macOS: Usually pre-installed or via Homebrew (brew install portaudio)
+# Linux: sudo apt-get install portaudio19-dev (or equivalent)
+openai-whisper>=20231117
+sounddevice>=0.4.6
+pyttsx3>=2.90
+scipy>=1.11.0
+# piper-tts>=0.0.1  # Optional advanced TTS (requires manual setup)
+
+# Delegation (Day 4) - Optional
+litellm>=1.0.0
+requests>=2.31.0
+
+# Learning/Fine-Tuning (Optional - for Green Vault learning)
+# Note: These are only needed if you plan to fine-tune models
+# They are large packages and may take time to install
+transformers>=4.35.0
+peft>=0.7.0
+accelerate>=0.25.0
+torch>=2.1.0
+datasets>=2.14.0
+
+# Development
+black>=23.0.0
+mypy>=1.0.0
+pytest-cov>=4.0.0
