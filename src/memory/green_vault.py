@@ -134,6 +134,73 @@ class GreenVault:
             print(f"⚠️  Error storing summary in Green Vault: {e}")
             return ""
     
+    def get_summaries(self, client_id: Optional[str] = None, limit: int = 100) -> List[Dict]:
+        """
+        Get summaries from Green Vault (for export).
+        
+        Args:
+            client_id: Optional client identifier filter
+            limit: Maximum number of summaries to return
+            
+        Returns:
+            List of summary dictionaries
+        """
+        # Axiom 8: Red Thread Protocol
+        if RED_THREAD_EVENT and RED_THREAD_EVENT.is_set():
+            print("🔴 Red Thread active - Green Vault export blocked")
+            return []
+        
+        try:
+            # Get recent summaries from SQLite (episodic storage)
+            summaries = self.sqlite.get_recent_memories(limit=limit)
+            
+            # Format summaries for export
+            formatted_summaries = []
+            for memory in summaries:
+                formatted_summary = {
+                    "content": memory.get("user_input", "") or memory.get("content", ""),
+                    "tags": memory.get("tags", []),
+                    "confidence": memory.get("confidence", 0.5),
+                    "timestamp": memory.get("timestamp", ""),
+                    "metadata": {
+                        "memory_id": memory.get("id"),
+                        "type": "summary"
+                    }
+                }
+                formatted_summaries.append(formatted_summary)
+            
+            return formatted_summaries[:limit]
+        except Exception as e:
+            print(f"⚠️  Error getting summaries from Green Vault: {e}")
+            return []
+    
+    def get_recent_summaries(self, limit: int = 50) -> List[Dict]:
+        """Get recent summaries from Green Vault (convenience method)."""
+        return self.get_summaries(limit=limit)
+    
+    def add_summary_from_import(self, content: str, client_id: Optional[str] = None, metadata: Optional[Dict] = None) -> str:
+        """
+        Add summary to Green Vault (for import from soul transfer).
+        
+        Args:
+            content: Summary content
+            client_id: Optional client identifier
+            metadata: Optional metadata dictionary (should contain 'tags' and 'confidence')
+            
+        Returns:
+            Entry ID if successful, empty string otherwise
+        """
+        tags = metadata.get("tags", []) if metadata else []
+        confidence = metadata.get("confidence", 0.5) if metadata else 0.5
+        
+        # Call the main add_summary method with correct parameters
+        return self.add_summary(
+            summary=content,
+            tags=tags,
+            confidence=confidence,
+            expiry=None
+        )
+    
     def query_context(self, query: str, n_results: int = 5) -> List[Dict]:
         """
         Query context from Green Vault using semantic search.

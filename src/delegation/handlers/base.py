@@ -2,6 +2,7 @@
 Base Delegation Handler Interface
 All delegation handlers must implement this interface.
 """
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, List, Callable, Any
 from enum import Enum
@@ -16,6 +17,7 @@ class HandlerCapability(Enum):
     VIDEO_PROCESSING = "video_processing"
     AUDIO_PROCESSING = "audio_processing"
     HOME_AUTOMATION = "home_automation"
+    MEDIA_CONTROL = "media_control"
     WEATHER = "weather"
     CALENDAR = "calendar"
     EMAIL = "email"

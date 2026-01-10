@@ -259,9 +259,12 @@ class RedVault:
             print(f"⚠️  Error decrypting secret from Red Vault: {e}")
             return None
     
-    def list_secrets(self) -> List[str]:
+    def list_secrets(self, client_id: Optional[str] = None) -> List[str]:
         """
         List all secret IDs in Red Vault.
+        
+        Args:
+            client_id: Optional client identifier filter
         
         Returns:
             List of secret IDs (no decryption occurs)
@@ -275,7 +278,87 @@ class RedVault:
             print("🔴 Red Thread active - Red Vault list blocked")
             return []
         
-        return list(self._metadata.keys())
+        secret_ids = list(self._metadata.keys())
+        
+        # Filter by client_id if provided (metadata may contain client_id)
+        if client_id:
+            filtered_ids = []
+            for secret_id in secret_ids:
+                metadata = self._metadata.get(secret_id, {})
+                if metadata.get("client_id") == client_id:
+                    filtered_ids.append(secret_id)
+            return filtered_ids
+        
+        return secret_ids
+    
+    def get_unlocked_secrets(self, client_id: Optional[str] = None, safe_word: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get unlocked secrets for export (requires safe word for decryption).
+        
+        Args:
+            client_id: Optional client identifier filter
+            safe_word: Safe word for decryption (required for export)
+            
+        Returns:
+            List of secret dictionaries with keys and values
+        """
+        # Axiom 8: Red Thread Protocol
+        if RED_THREAD_EVENT and RED_THREAD_EVENT.is_set():
+            print("🔴 Red Thread active - Red Vault export blocked")
+            return []
+        
+        if not safe_word:
+            # Cannot decrypt without safe word - return empty list
+            return []
+        
+        try:
+            secrets_list = []
+            secret_ids = self.list_secrets(client_id=client_id)
+            
+            for secret_id in secret_ids:
+                # Decrypt secret
+                decrypted_value = self.decrypt_for_session(secret_id, safe_word)
+                if decrypted_value:
+                    secrets_list.append({
+                        "key": secret_id,
+                        "value": decrypted_value,
+                        "encrypted": True
+                    })
+            
+            return secrets_list
+        except Exception as e:
+            print(f"⚠️  Error getting unlocked secrets: {e}")
+            return []
+    
+    def store_secret_from_import(
+        self,
+        key: str,
+        value: str,
+        client_id: Optional[str] = None,
+        safe_word: Optional[str] = None
+    ) -> bool:
+        """
+        Store a secret in Red Vault (for import from soul transfer).
+        
+        Args:
+            key: Secret key/identifier
+            value: Secret value to encrypt and store
+            client_id: Optional client identifier
+            safe_word: Safe word for encryption (required)
+            
+        Returns:
+            True if stored successfully
+        """
+        if not safe_word:
+            print("⚠️  Safe word required for Red Vault storage")
+            return False
+        
+        # Use existing store_secret method
+        return self.store_secret(
+            secret_id=key,
+            secret_data=value,
+            safe_word=safe_word
+        )
     
     def delete_secret(self, secret_id: str) -> bool:
         """

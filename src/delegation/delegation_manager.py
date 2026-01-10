@@ -2,20 +2,66 @@
 Refactored Delegation Manager - Plugin-Based Architecture
 Supports dynamic handler registration and capability-based routing.
 """
+from __future__ import annotations
 from typing import Dict, Optional, List, Callable, Any
 from datetime import datetime
 from enum import Enum
 import threading
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .handlers.base import (
     DelegationHandler, DelegationRequest, DelegationResult, HandlerCapability
 )
-from .handlers.n8n_handler import N8NDelegationHandler
-from .handlers.image_handler import ImageProcessingHandler
-from .handlers.home_automation_handler import HomeAutomationHandler
-from .litellm_router import LiteLLMRouter, TaskType
-from .n8n_client import N8NClient
-from .home_assistant import HomeAssistantClient
+
+# Optional handler imports (may fail if dependencies not available)
+try:
+    from .handlers.n8n_handler import N8NDelegationHandler
+except ImportError:
+    N8NDelegationHandler = None
+
+try:
+    from .handlers.image_handler import ImageProcessingHandler
+except ImportError:
+    ImageProcessingHandler = None
+
+try:
+    from .handlers.home_automation_handler import HomeAutomationHandler
+except ImportError:
+    HomeAutomationHandler = None
+
+try:
+    from .litellm_router import LiteLLMRouter, TaskType
+except ImportError:
+    LiteLLMRouter = None
+    TaskType = None
+
+try:
+    from .n8n_client import N8NClient
+except ImportError:
+    N8NClient = None
+
+try:
+    from .home_assistant import HomeAssistantClient
+except ImportError:
+    HomeAssistantClient = None
+
+# Optional Plex handler import
+try:
+    from .handlers.plex_handler import PlexDelegationHandler
+    PLEX_HANDLER_AVAILABLE = True
+except ImportError:
+    PLEX_HANDLER_AVAILABLE = False
+    PlexDelegationHandler = None
+
+# Optional File Analysis handler import
+try:
+    from .handlers.file_analysis_handler import FileAnalysisHandler
+    FILE_ANALYSIS_AVAILABLE = True
+except ImportError:
+    FILE_ANALYSIS_AVAILABLE = False
+    FileAnalysisHandler = None
 
 # Import Red Thread event for constitutional integration (Axiom 8)
 try:
@@ -42,6 +88,8 @@ class DelegationManager:
         n8n_api_key: Optional[str] = None,
         home_assistant_url: Optional[str] = None,
         home_assistant_token: Optional[str] = None,
+        plex_server_url: Optional[str] = None,
+        plex_token: Optional[str] = None,
         require_confirmation: bool = True
     ):
         """
@@ -58,15 +106,19 @@ class DelegationManager:
         self.require_confirmation = require_confirmation
         
         # Initialize clients
-        self.llm_router = LiteLLMRouter(litellm_config) if litellm_config else LiteLLMRouter()
-        self.n8n_client = N8NClient(n8n_url, n8n_api_key) if n8n_url else None
+        self.llm_router = LiteLLMRouter(litellm_config) if (litellm_config and LiteLLMRouter) else (LiteLLMRouter() if LiteLLMRouter else None)
+        self.n8n_client = N8NClient(n8n_url, n8n_api_key) if (n8n_url and N8NClient) else None
+        
+        # Store Plex config
+        self.plex_server_url = plex_server_url
+        self.plex_token = plex_token
         
         # Handler registry
         self.handlers: Dict[str, DelegationHandler] = {}
         self.capability_map: Dict[HandlerCapability, List[DelegationHandler]] = {}
         
         # Initialize built-in handlers
-        self._initialize_handlers(home_assistant_url, home_assistant_token)
+        self._initialize_handlers(home_assistant_url, home_assistant_token, plex_server_url, plex_token)
         
         # Delegation history
         self.delegation_history: List[Dict] = []
@@ -74,11 +126,13 @@ class DelegationManager:
     def _initialize_handlers(
         self,
         home_assistant_url: Optional[str],
-        home_assistant_token: Optional[str]
+        home_assistant_token: Optional[str],
+        plex_server_url: Optional[str] = None,
+        plex_token: Optional[str] = None
     ):
         """Initialize built-in handlers."""
         # Initialize n8n handler with workflow mappings
-        if self.n8n_client:
+        if self.n8n_client and N8NDelegationHandler:
             n8n_workflow_map = {
                 HandlerCapability.IMAGE_PROCESSING: "/webhook/image-processing",
                 HandlerCapability.IMAGE_GENERATION: "/webhook/image-generation",
@@ -89,18 +143,44 @@ class DelegationManager:
             self.register_handler(n8n_handler)
         
         # Initialize image processing handler
-        n8n_handler = self.handlers.get("n8n_handler")
-        image_handler = ImageProcessingHandler(n8n_handler)
-        self.register_handler(image_handler)
+        if ImageProcessingHandler:
+            n8n_handler = self.handlers.get("n8n_handler")
+            image_handler = ImageProcessingHandler(n8n_handler)
+            self.register_handler(image_handler)
         
         # Initialize home automation handler
-        home_assistant = (
-            HomeAssistantClient(home_assistant_url, home_assistant_token)
-            if home_assistant_url and home_assistant_token
-            else None
-        )
-        ha_handler = HomeAutomationHandler(n8n_handler, home_assistant)
-        self.register_handler(ha_handler)
+        if HomeAutomationHandler and HomeAssistantClient:
+            home_assistant = (
+                HomeAssistantClient(home_assistant_url, home_assistant_token)
+                if home_assistant_url and home_assistant_token
+                else None
+            )
+            n8n_handler = self.handlers.get("n8n_handler")
+            ha_handler = HomeAutomationHandler(n8n_handler, home_assistant)
+            self.register_handler(ha_handler)
+        
+        # Initialize Plex handler (optional, requires plexapi)
+        if PLEX_HANDLER_AVAILABLE and plex_server_url and plex_token:
+            try:
+                plex_handler = PlexDelegationHandler(
+                    plex_server_url=plex_server_url,
+                    plex_token=plex_token,
+                    allow_history_tracking=False  # Default: require explicit consent
+                )
+                if plex_handler.is_available():
+                    self.register_handler(plex_handler)
+            except Exception as e:
+                logger.warning(f"Failed to initialize Plex handler: {e}")
+        
+        # Initialize File Analysis handler (optional, uses local models)
+        if FILE_ANALYSIS_AVAILABLE:
+            try:
+                file_handler = FileAnalysisHandler()
+                if file_handler.is_available():
+                    self.register_handler(file_handler)
+                    logger.info("File Analysis handler registered")
+            except Exception as e:
+                logger.warning(f"Failed to initialize File Analysis handler: {e}")
     
     def register_handler(self, handler: DelegationHandler):
         """Register a delegation handler."""
@@ -208,9 +288,9 @@ class DelegationManager:
         capability: HandlerCapability,
         task_description: str,
         input_data: Dict[str, Any],
+        result_callback: Callable[[DelegationResult], None],
         context: Optional[Dict[str, Any]] = None,
         confirm_callback: Optional[Callable[[str], bool]] = None,
-        result_callback: Callable[[DelegationResult], None],
         timeout: Optional[int] = None
     ) -> bool:
         """
@@ -289,7 +369,7 @@ class DelegationManager:
     def delegate_to_model(
         self,
         query: str,
-        task_type: Optional[TaskType] = None,
+        task_type: Optional[Any] = None,  # TaskType if available, None otherwise
         context: Optional[Dict] = None,
         confirm_callback: Optional[Callable[[str], bool]] = None
     ) -> Optional[str]:
@@ -298,7 +378,7 @@ class DelegationManager:
             print("🔴 Red Thread active - delegation blocked")
             return None
         
-        if not self.llm_router.is_available():
+        if not self.llm_router or not self.llm_router.is_available():
             return None
         
         if task_type is None:

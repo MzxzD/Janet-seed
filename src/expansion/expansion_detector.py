@@ -55,6 +55,9 @@ class ExpansionDetector:
         if self._can_expand_home_assistant():
             opportunities.append(self._create_home_assistant_opportunity())
         
+        if self._can_expand_plex():
+            opportunities.append(self._create_plex_opportunity())
+        
         return opportunities
     
     def can_expand_to(self, expansion_type: str, hardware: Optional['HardwareProfile'] = None) -> bool:
@@ -82,6 +85,8 @@ class ExpansionDetector:
             return self._can_expand_n8n(hw)
         elif expansion_type == ExpansionType.HOME_ASSISTANT_INTEGRATION:
             return self._can_expand_home_assistant(hw)
+        elif expansion_type == ExpansionType.PLEX_INTEGRATION:
+            return self._can_expand_plex(hw)
         
         return False
     
@@ -340,5 +345,72 @@ class ExpansionDetector:
             reversible=True,
             requires_network=True,
             hardware_sufficient=True,  # Depends on HA availability, not local hardware
+        )
+    
+    def _can_expand_plex(self, hardware: Optional['HardwareProfile'] = None) -> bool:
+        """
+        Check if Plex integration is possible.
+        
+        Args:
+            hardware: Optional hardware profile (uses self.hardware if None)
+            
+        Returns:
+            True if Plex integration is possible (depends on local Plex server availability)
+        """
+        hw = hardware or self.hardware
+        
+        # Check if already enabled
+        if self.current_state.get("plex_integration_enabled", False):
+            return False
+        
+        # Check if network available (for Plex server discovery)
+        # Plex integration requires local network access to Plex server
+        # We can't auto-detect Plex server, but we can suggest if network is available
+        # or if user has plexapi installed
+        try:
+            import socket
+            socket.create_connection(("8.8.8.8", 53), timeout=1)
+            network_available = True
+        except (OSError, socket.timeout, socket.error):
+            network_available = False
+        
+        # Check if plexapi is available (optional, can be installed during wizard)
+        try:
+            import plexapi
+            plexapi_available = True
+        except ImportError:
+            plexapi_available = False
+        
+        # Suggest Plex if network available (user can configure manually if offline)
+        # Plex server itself may be on local network, so we suggest if network available
+        return network_available or plexapi_available
+    
+    def _create_plex_opportunity(self) -> ExpansionOpportunity:
+        """Create Plex Media Server integration opportunity."""
+        return ExpansionOpportunity(
+            expansion_type=ExpansionType.PLEX_INTEGRATION,
+            name="Plex Media Server Integration",
+            description="Connect Janet to your local Plex Media Server for media browsing and playback control.",
+            benefits=[
+                "Browse your Plex library via voice/text",
+                "Control playback on Plex clients (TV, speakers, etc.)",
+                "Get recommendations based on watch history (with consent)",
+                "Query library statistics (unwatched episodes, recent additions)"
+            ],
+            risks=[
+                "Requires local Plex Media Server running",
+                "Network access to Plex server needed",
+                "Media preferences stored in Green Vault (with consent only)",
+                "Watch history tracking requires explicit consent"
+            ],
+            requirements={
+                "network": True,  # Local network for Plex server
+                "plex_server": True,  # User's local Plex server
+                "plex_token": True,  # Authentication token
+            },
+            estimated_setup_time="10-15 minutes",
+            reversible=True,
+            requires_network=True,  # Local network for Plex server
+            hardware_sufficient=True,  # Depends on Plex server availability, not local hardware
         )
 

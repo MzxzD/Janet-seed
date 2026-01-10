@@ -13,6 +13,7 @@ from .model_wizard import ModelInstallationWizard
 from .n8n_wizard import N8NWizard
 from .home_assistant_wizard import HomeAssistantWizard
 from .learning_wizard import LearningWizard
+from .plex_wizard import PlexWizard
 
 __all__ = [
     'ExpansionWizard',
@@ -23,5 +24,6 @@ __all__ = [
     'N8NWizard',
     'HomeAssistantWizard',
     'LearningWizard',
+    'PlexWizard',
 ]
 

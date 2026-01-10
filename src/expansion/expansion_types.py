@@ -19,6 +19,7 @@ class ExpansionType(str, Enum):
     MODEL_INSTALLATION = "model_installation"
     N8N_INTEGRATION = "n8n_integration"
     HOME_ASSISTANT_INTEGRATION = "home_assistant_integration"
+    PLEX_INTEGRATION = "plex_integration"
 
 
 @dataclass

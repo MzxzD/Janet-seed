@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Optional, List
 from datetime import datetime, timedelta
 import json
+import logging
 
 from .green_vault import GreenVault
 from .blue_vault import BlueVault
@@ -13,6 +14,8 @@ from .red_vault import RedVault
 from .classification import ConversationClassifier
 from .distillation import ConversationDistiller
 from .memory_gates import MemoryGates
+
+logger = logging.getLogger(__name__)
 
 # Import Red Thread event for constitutional integration (Axiom 8)
 try:
@@ -283,6 +286,63 @@ class MemoryManager:
         
         return False
     
+    def import_context(
+        self,
+        exported_context: Dict[str, Any],
+        client_id: Optional[str] = None
+    ) -> int:
+        """
+        Import conversation context from soul transfer.
+        
+        Args:
+            exported_context: Exported context dictionary from memory_transfer
+            client_id: Optional client identifier override
+            
+        Returns:
+            Number of messages/vaults imported
+        """
+        # Extract client_id
+        import_client_id = client_id or exported_context.get("client_id")
+        if not import_client_id:
+            return 0
+        
+        imported_count = 0
+        
+        # Import conversation messages
+        messages = exported_context.get("messages", [])
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role in ["user", "assistant"] and content:
+                # Store using vault system
+                if role == "user":
+                    # Store as conversation (will be classified)
+                    self.store_conversation([msg], context=None)
+                imported_count += 1
+        
+        # Import Green Vault summaries (safe, distilled)
+        if "green" in exported_context.get("vaults", {}):
+            green_data = exported_context["vaults"]["green"]
+            if green_data.get("status") == "exported":
+                summaries = green_data.get("summaries", [])
+                for summary in summaries:
+                    try:
+                        # Add to Green Vault
+                        self.green_vault.add_summary(
+                            summary=summary.get("content", ""),
+                            tags=summary.get("tags", []),
+                            confidence=summary.get("confidence", 0.5),
+                            expiry=None
+                        )
+                        imported_count += 1
+                    except Exception as e:
+                        print(f"⚠️  Error importing Green Vault summary: {e}")
+        
+        # Note: Red Vault secrets require safe word unlock before import
+        # Blue Vault is never imported (ephemeral, session-only)
+        
+        return imported_count
+    
     def search(self, query: str, n_results: int = 5) -> List[Dict]:
         """
         Search memories semantically (Green Vault only).
@@ -423,6 +483,72 @@ class MemoryManager:
         
         print(f"📊 Weekly summary generated: {len(week_memories)} conversations")
     
+    def import_context(
+        self,
+        exported_context: Dict[str, Any],
+        client_id: Optional[str] = None
+    ) -> int:
+        """
+        Import conversation context from soul transfer.
+        
+        Args:
+            exported_context: Exported context dictionary from memory_transfer
+            client_id: Optional client identifier override
+            
+        Returns:
+            Number of messages/vaults imported
+        """
+        import_client_id = client_id or exported_context.get("client_id")
+        if not import_client_id:
+            return 0
+        
+        imported_count = 0
+        
+        # Import conversation messages
+        messages = exported_context.get("messages", [])
+        conversation_pairs = []
+        current_pair = []
+        
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "user":
+                if current_pair:
+                    conversation_pairs.append(current_pair)
+                current_pair = [{"role": role, "content": content}]
+            elif role == "assistant" and current_pair:
+                current_pair.append({"role": role, "content": content})
+                conversation_pairs.append(current_pair)
+                current_pair = []
+        
+        # Store conversation pairs
+        for pair in conversation_pairs:
+            if len(pair) >= 2:  # User + Assistant pair
+                self.store_conversation(pair, context=None)
+                imported_count += len(pair)
+        
+        # Import Green Vault summaries (safe, distilled)
+        if "green" in exported_context.get("vaults", {}):
+            green_data = exported_context["vaults"]["green"]
+            if green_data.get("status") == "exported":
+                summaries = green_data.get("summaries", [])
+                for summary in summaries:
+                    try:
+                        self.green_vault.add_summary(
+                            summary=summary.get("content", ""),
+                            tags=summary.get("tags", []),
+                            confidence=summary.get("confidence", 0.5),
+                            expiry=None
+                        )
+                        imported_count += 1
+                    except Exception as e:
+                        print(f"⚠️  Error importing Green Vault summary: {e}")
+        
+        # Note: Red Vault secrets require safe word unlock before import
+        # Blue Vault is never imported (ephemeral, session-only)
+        
+        return imported_count
+    
     def get_stats(self) -> Dict:
         """Get memory statistics."""
         try:
@@ -442,4 +568,66 @@ class MemoryManager:
             "semantic_count": semantic_count,
             "last_summary": self.last_summary_date.isoformat() if self.last_summary_date else None
         }
+    
+    def export_inference_patterns(self) -> Dict[str, Any]:
+        """Export learned inference shortcuts from memory.
+        
+        Patterns like: "When user says X, they likely mean Y with confidence Z"
+        Extract from Green Vault summaries, look for repeated associations,
+        preferences, contextual clues.
+        
+        Returns:
+            Dictionary containing inference patterns:
+            {
+                "shortcuts": Dict[str, Dict],  # Learned shortcuts
+                "associations": Dict[str, List],  # Repeated associations
+                "preferences": Dict[str, Any],  # User preferences detected
+                "contextual_clues": List[str]  # Context patterns
+            }
+        """
+        patterns = {
+            "shortcuts": {},
+            "associations": {},
+            "preferences": {},
+            "contextual_clues": []
+        }
+        
+        # Extract patterns from Green Vault if available
+        if self.green_vault:
+            try:
+                # Get recent summaries for pattern extraction
+                if hasattr(self.green_vault, 'get_recent_summaries'):
+                    summaries = self.green_vault.get_recent_summaries(limit=100)
+                    
+                    # Extract patterns from summaries
+                    # This is a simplified version - actual implementation may vary
+                    # May integrate with learning_manager if available
+                    for summary in summaries:
+                        content = summary.get("content", "") if isinstance(summary, dict) else str(summary)
+                        tags = summary.get("tags", []) if isinstance(summary, dict) else []
+                        
+                        # Extract contextual clues from tags
+                        if tags:
+                            patterns["contextual_clues"].extend(tags)
+                        
+                        # Look for repeated associations (simplified - real implementation would use ML)
+                        # For now, just collect common tags/patterns
+                
+                # Extract patterns from learning_manager if available
+                if self.learning_manager and hasattr(self.learning_manager, 'get_learned_patterns'):
+                    try:
+                        learned_patterns = self.learning_manager.get_learned_patterns()
+                        if learned_patterns:
+                            patterns["shortcuts"] = learned_patterns
+                    except Exception as e:
+                        logger.debug(f"Could not extract learned patterns from learning_manager: {e}")
+                
+            except Exception as e:
+                logger.error(f"Error exporting inference patterns: {e}")
+                patterns["error"] = str(e)
+        
+        # Remove duplicates from contextual_clues
+        patterns["contextual_clues"] = list(set(patterns["contextual_clues"]))
+        
+        return patterns
 

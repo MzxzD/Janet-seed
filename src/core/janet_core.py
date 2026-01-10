@@ -739,4 +739,170 @@ class JanetCore:
             import traceback
             traceback.print_exc()
             return False
+    
+    def export_soul_state(self) -> Dict[str, Any]:
+        """Export complete soul state for ritual transfer.
+        
+        This is the main entry point for full soul export.
+        
+        Returns:
+            Dictionary containing complete soul state:
+            {
+                "memory_state": Dict,
+                "thinking_patterns": Dict,
+                "capability_blueprints": Dict,
+                "emotional_tone": Dict,
+                "personality_state": Dict
+            }
+        """
+        state = {
+            "memory_state": None,
+            "thinking_patterns": {},
+            "capability_blueprints": {},
+            "emotional_tone": {},
+            "personality_state": {}
+        }
+        
+        if self.memory_manager:
+            # Use memory_transfer's export_full_soul_state
+            try:
+                from bridge.memory_transfer import MemoryTransfer
+                transfer = MemoryTransfer(constitutional_memory_manager=self.memory_manager)
+                state["memory_state"] = transfer.export_full_soul_state(
+                    self.memory_manager,
+                    janet_core=self
+                )
+            except Exception as e:
+                print(f"⚠️  Error exporting memory state: {e}")
+                state["memory_state"] = {"error": str(e)}
+        
+        # Export thinking patterns (inference shortcuts)
+        if self.janet_brain:
+            state["thinking_patterns"] = self._export_inference_patterns()
+        
+        # Export capability blueprints
+        if self.delegation_manager:
+            state["capability_blueprints"] = self._export_capability_blueprints()
+        
+        # Export tone matrices
+        if self.tone_awareness:
+            try:
+                if hasattr(self.tone_awareness, 'export_matrix'):
+                    state["emotional_tone"] = self.tone_awareness.export_matrix()
+                else:
+                    # Fallback: export schema if export_matrix not available
+                    state["emotional_tone"] = {
+                        "patterns": getattr(self.tone_awareness, 'tone_patterns', {}),
+                        "emotional_indicators": getattr(self.tone_awareness, 'emotional_indicators', {})
+                    }
+            except Exception as e:
+                print(f"⚠️  Error exporting tone matrices: {e}")
+                state["emotional_tone"] = {"error": str(e)}
+        
+        # Export personality state
+        state["personality_state"] = {
+            "constitution_hash": None,
+            "preferences": {}
+        }
+        if hasattr(self.constitution, 'hash'):
+            state["personality_state"]["constitution_hash"] = self.constitution.hash
+        if hasattr(self.constitution, 'raw_data'):
+            raw_data = self.constitution.raw_data
+            if isinstance(raw_data, dict):
+                state["personality_state"]["preferences"] = raw_data.get("preferences", {})
+        
+        return state
+    
+    def _export_inference_patterns(self) -> Dict[str, Any]:
+        """Export learned inference shortcuts and thinking patterns.
+        
+        Patterns like: "useless" → Konosuba reference (confidence: 0.83)
+        Common reasoning chains, response style preferences.
+        
+        Returns:
+            Dictionary containing inference patterns
+        """
+        patterns = {}
+        
+        # Extract from memory_manager if available
+        if self.memory_manager and hasattr(self.memory_manager, 'export_inference_patterns'):
+            try:
+                patterns = self.memory_manager.export_inference_patterns()
+            except Exception as e:
+                print(f"⚠️  Error exporting inference patterns from memory: {e}")
+        
+        # Extract from janet_brain conversation history if available
+        if self.janet_brain and hasattr(self.janet_brain, 'get_conversation_history'):
+            try:
+                conversation_history = self.janet_brain.get_conversation_history()
+                # Placeholder: would extract patterns from conversation history
+                # This would require pattern recognition/ML to identify shortcuts
+                if conversation_history:
+                    patterns["conversation_history_length"] = len(conversation_history)
+            except Exception as e:
+                print(f"⚠️  Error extracting patterns from conversation history: {e}")
+        
+        # Extract from learning_manager if available
+        if self.memory_manager and hasattr(self.memory_manager, 'learning_manager') and self.memory_manager.learning_manager:
+            try:
+                # Learning manager may have learned patterns
+                if hasattr(self.memory_manager.learning_manager, 'get_learned_patterns'):
+                    learned = self.memory_manager.learning_manager.get_learned_patterns()
+                    if learned:
+                        patterns["learned_patterns"] = learned
+            except Exception as e:
+                print(f"⚠️  Error extracting learned patterns: {e}")
+        
+        return patterns
+    
+    def _export_capability_blueprints(self) -> Dict[str, Any]:
+        """Export how capabilities/handlers work (structure, not secrets).
+        
+        Returns:
+            Dictionary containing capability blueprints (handler structures, NOT secrets or API keys)
+        """
+        if not self.delegation_manager:
+            return {}
+        
+        blueprints = {}
+        
+        try:
+            # Get handlers from delegation_manager
+            if hasattr(self.delegation_manager, 'handlers'):
+                for handler_id, handler in self.delegation_manager.handlers.items():
+                    # Export handler structure, capabilities, parameters
+                    # But NOT secrets, API keys, or sensitive data
+                    blueprint = {
+                        "handler_id": handler_id,
+                        "name": getattr(handler, 'name', ''),
+                        "capabilities": [],
+                        "requires_confirmation": getattr(handler, 'requires_confirmation', False),
+                        "description": getattr(handler, 'description', ''),
+                        "available": handler.is_available() if hasattr(handler, 'is_available') else False
+                    }
+                    
+                    # Get capabilities
+                    if hasattr(handler, 'get_capabilities'):
+                        try:
+                            capabilities = handler.get_capabilities()
+                            blueprint["capabilities"] = [
+                                c.value if hasattr(c, 'value') else str(c) for c in capabilities
+                            ]
+                        except Exception as e:
+                            print(f"⚠️  Error getting capabilities for handler {handler_id}: {e}")
+                    
+                    blueprints[handler_id] = blueprint
+            
+            # Also get capability map if available
+            if hasattr(self.delegation_manager, 'capability_map'):
+                capability_map = {}
+                for capability, handlers in self.delegation_manager.capability_map.items():
+                    capability_map[str(capability)] = [h.handler_id if hasattr(h, 'handler_id') else str(h) for h in handlers]
+                blueprints["capability_map"] = capability_map
+        
+        except Exception as e:
+            print(f"⚠️  Error exporting capability blueprints: {e}")
+            blueprints["error"] = str(e)
+        
+        return blueprints
 
