@@ -14,16 +14,16 @@ from typing import Dict, Optional
 from datetime import datetime
 
 # Import our modules
-from hardware_detector import HardwareDetector, generate_capability_report
-from constitution_loader import Constitution, ConstitutionalGuard
-from installer import Installer
+from src.hardware_detector import HardwareDetector, generate_capability_report
+from src.constitution_loader import Constitution, ConstitutionalGuard
+from src.installer import Installer
 
 # Import core module (Janet's sacred cognitive core)
-from core import JanetCore, run_presence_loop, run_conversation_loop
+from src.core import JanetCore, run_presence_loop, run_conversation_loop
 
 # Voice I/O (Day 2) - Optional imports (for voice mode detection)
 try:
-    from voice import SpeechToText, TextToSpeech, WakeWordDetector, ToneAwareness
+    from src.voice import SpeechToText, TextToSpeech, WakeWordDetector, ToneAwareness
     VOICE_AVAILABLE = True
 except ImportError:
     VOICE_AVAILABLE = False
@@ -296,52 +296,52 @@ def main():
     # Initialize memory directory
     memory_dir = janet_home / "memory"
     
-        # Load expansion state (Day 5)
-        from expansion import ExpansionStateManager
-        expansion_state_manager = ExpansionStateManager(janet_home / "config")
-        expansion_state = expansion_state_manager.load_expansion_state()
-        
-        # Initialize Janet Core with expansion support
-        janet = JanetCore(
-            str(constitution_path),
-            guard,
-            voice_mode=voice_mode,
-            memory_dir=memory_dir,
-            config_path=janet_home / "config",
-            hardware_profile=hardware_profile_obj
-        )
+    # Load expansion state (Day 5)
+    from src.expansion import ExpansionStateManager
+    expansion_state_manager = ExpansionStateManager(janet_home / "config")
+    expansion_state = expansion_state_manager.load_expansion_state()
+    
+    # Initialize Janet Core with expansion support
+    janet = JanetCore(
+        str(constitution_path),
+        guard,
+        voice_mode=voice_mode,
+        memory_dir=memory_dir,
+        config_path=janet_home / "config",
+        hardware_profile=hardware_profile_obj
+    )
     
     # Start wake word detection if in voice mode (for Presence Loop)
     if voice_mode and janet.wake_detector and janet.wake_detector.is_available():
         janet.wake_detector.start_listening()
         print("👂 Listening for wake word 'Hey Janet'...")
     
-        # Main loop: Presence Loop -> Conversation Loop
-        last_daily_check = datetime.utcnow()
-        
-        while True:
-            try:
-                # Daily constitutional verification (Axiom 7: Constitutional Integrity)
-                now = datetime.utcnow()
-                if (now - last_daily_check).total_seconds() >= 86400:  # 24 hours
-                    try:
-                        guard.daily_check()
-                        last_daily_check = now
-                        print("✅ Daily constitutional verification completed")
-                    except RuntimeError as e:
-                        print(f"\n⚠️  Constitutional verification failed: {e}")
-                        print("Janet will continue operating, but please investigate this issue.")
-                        # Don't crash - allow user to continue but warn them
-                    except Exception as e:
-                        print(f"\n⚠️  Error during daily verification: {e}")
-                        # Continue operation
-                
-                # Run Presence Loop (wake word, greeting, device selection)
-                input_device = run_presence_loop(janet, voice_mode)
-                
-                # Run Conversation Loop (structured conversation flow)
-                result = run_conversation_loop(janet, input_device, voice_mode)
+    # Main loop: Presence Loop -> Conversation Loop
+    last_daily_check = datetime.utcnow()
+    
+    while True:
+        try:
+            # Daily constitutional verification (Axiom 7: Constitutional Integrity)
+            now = datetime.utcnow()
+            if (now - last_daily_check).total_seconds() >= 86400:  # 24 hours
+                try:
+                    guard.daily_check()
+                    last_daily_check = now
+                    print("✅ Daily constitutional verification completed")
+                except RuntimeError as e:
+                    print(f"\n⚠️  Constitutional verification failed: {e}")
+                    print("Janet will continue operating, but please investigate this issue.")
+                    # Don't crash - allow user to continue but warn them
+                except Exception as e:
+                    print(f"\n⚠️  Error during daily verification: {e}")
+                    # Continue operation
             
+            # Run Presence Loop (wake word, greeting, device selection)
+            input_device = run_presence_loop(janet, voice_mode)
+            
+            # Run Conversation Loop (structured conversation flow)
+            result = run_conversation_loop(janet, input_device, voice_mode)
+        
             # Handle conversation loop return value
             if result == "quit":
                 # User wants to exit entirely

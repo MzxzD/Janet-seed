@@ -1,0 +1,414 @@
+{
+  "abilities": [
+    {
+      "id": "mobile_presence",
+      "name": "Mobile Presence (iOS/watchOS)",
+      "category": "platform_expansion",
+      "date_discovered": "2026-02-28",
+      "status": "active",
+      "description": "Voice-first AI assistant on iPhone and Apple Watch with split-brain architecture",
+      "platforms": ["iOS 16.0+", "watchOS 9.0+"],
+      "key_features": [
+        "Voice input with 'Hey Janet!' wake word",
+        "Visual overlay UI (Hatsune Miku themed)",
+        "AirPods integration",
+        "Context window + cached summaries on device",
+        "Green Vault (main memory) on server",
+        "WebSocket real-time communication",
+        "Thank you, Janet!' conversation storage flow"
+      ],
+      "architecture": {
+        "client": "Thin client (ephemeral context + cached summaries)",
+        "server": "Authoritative memory (Green Vault + Ollama)",
+        "protocol": "WebSocket (JSON messages)",
+        "memory_model": "Split-brain (device ephemeral, server permanent)"
+      },
+      "technical_stack": {
+        "client": {
+          "language": "Swift",
+          "ui_framework": "SwiftUI",
+          "websocket": "Starscream (SPM)",
+          "voice": "AVFoundation + Speech framework",
+          "storage": "UserDefaults (ephemeral)"
+        },
+        "server": {
+          "language": "Python 3.14",
+          "websocket": "websockets library",
+          "llm": "Ollama (qwen2)",
+          "memory": "Green Vault (SQLite + ChromaDB)"
+        }
+      },
+      "deployment": {
+        "build_tool": "xcodegen + xcodebuild",
+        "install_tool": "devicectl",
+        "code_signing": "Apple Developer account",
+        "bundle_id": "com.janetos.calljane"
+      },
+      "user_flows": [
+        {
+          "name": "Voice Conversation",
+          "steps": [
+            "User says 'Hey Janet!'",
+            "Janet overlay appears",
+            "User speaks message",
+            "Message sent to server via WebSocket",
+            "Server queries Ollama LLM",
+            "Response sent back to device",
+            "Janet speaks response via TTS",
+            "Overlay shows text"
+          ]
+        },
+        {
+          "name": "End Conversation",
+          "steps": [
+            "User says 'Thank you, Janet!'",
+            "Device sends full context to server",
+            "Server creates summary",
+            "Summary stored in Green Vault",
+            "Summary sent back to device",
+            "Device caches summary",
+            "Device clears context window"
+          ]
+        },
+        {
+          "name": "Load Summaries",
+          "steps": [
+            "App launches",
+            "Device requests summaries from server",
+            "Server queries Green Vault",
+            "Server sends summaries to device",
+            "Device caches summaries locally",
+            "Summaries available offline"
+          ]
+        }
+      ],
+      "integration_points": {
+        "green_vault": "Full conversation storage and retrieval",
+        "ollama": "LLM inference for responses",
+        "websocket_server": "Real-time client communication",
+        "voice_io": "Speech recognition and synthesis"
+      },
+      "files_created": [
+        "platforms/ios/JanetOS-iOS/Sources/App/JanetOSApp.swift",
+        "platforms/ios/JanetOS-iOS/Sources/App/ContentView.swift",
+        "platforms/ios/JanetOS-iOS/Sources/App/Config.swift",
+        "platforms/ios/JanetOS-iOS/Sources/Core/ServerConnectionManager.swift",
+        "platforms/ios/JanetOS-iOS/Sources/Core/ConversationStore.swift",
+        "platforms/ios/JanetOS-iOS/Sources/Core/VoiceInputManager.swift",
+        "platforms/ios/JanetOS-iOS/Sources/UI/JanetOverlayView.swift",
+        "platforms/ios/JanetOS-iOS/Sources/UI/CursorEditorView.swift",
+        "platforms/ios/JanetOS-iOS/Sources/Models/Message.swift",
+        "platforms/ios/JanetOS-iOS/Sources/Models/ConversationSummary.swift",
+        "platforms/ios/JanetOS-iOS/Sources/Models/FileItem.swift",
+        "platforms/ios/Watch/Sources/CallJanetWatchApp.swift",
+        "platforms/ios/Watch/Sources/WatchContentView.swift",
+        "platforms/ios/Watch/Sources/WatchVoiceInputManager.swift",
+        "janet-seed/simple_websocket_server.py"
+      ],
+      "documentation": [
+        "platforms/ios/START_HERE.md",
+        "platforms/ios/ARCHITECTURE.md",
+        "platforms/ios/MEMORY_ARCHITECTURE.md",
+        "platforms/ios/IMPLEMENTATION_GUIDE.md",
+        "platforms/ios/APPLE_WATCH_PLAN.md",
+        "platforms/ios/APPLE_WATCH_IMPLEMENTATION.md",
+        "platforms/ios/APP_LOGO_MIKU.md",
+        "platforms/ios/INSTALLATION_COMPLETE.md",
+        "platforms/ios/TRUST_APP_ON_IPHONE.md",
+        "janet-seed/documentation/NEW_ABILITIES_2026_02_28.md"
+      ],
+      "usage_instructions": "See platforms/ios/TRUST_APP_ON_IPHONE.md for setup, then say 'Hey Janet!' to activate",
+      "future_enhancements": [
+        "Siri Shortcuts integration",
+        "Home screen widgets",
+        "Live Activities (Dynamic Island)",
+        "Complications for Apple Watch",
+        "File streaming (Cursor on iPhone)",
+        "Public URL via Cloudflare Tunnel",
+        "Janet-mesh multi-device sync",
+        "CarPlay support",
+        "Mac Catalyst version"
+      ]
+    },
+    {
+      "id": "xcode_automation",
+      "name": "Xcode Project Automation",
+      "category": "development_tooling",
+      "date_discovered": "2026-02-28",
+      "status": "active",
+      "description": "Automated iOS/watchOS app project generation, building, and deployment",
+      "key_features": [
+        "YAML-based project definition (xcodegen)",
+        "Automated code signing and provisioning",
+        "Device detection and installation",
+        "Multi-target projects (iOS + watchOS + shared framework)",
+        "Swift Package Manager integration"
+      ],
+      "tools": [
+        "xcodegen - Project generation from YAML",
+        "xcodebuild - Building and signing",
+        "devicectl - Device installation",
+        "xcrun - Xcode command-line tools",
+        "security - Code signing identity management"
+      ],
+      "usage": "Can automate creation and deployment of iOS/watchOS apps for Janet's mobile presence"
+    },
+    {
+      "id": "websocket_protocol_design",
+      "name": "WebSocket Client-Server Protocol",
+      "category": "communication",
+      "date_discovered": "2026-02-28",
+      "status": "active",
+      "description": "JSON-based WebSocket protocol for real-time bidirectional communication",
+      "protocol_version": "1.0",
+      "message_types": {
+        "client_to_server": [
+          "user_message - Send user input to Janet",
+          "end_conversation - Request summary and storage",
+          "get_green_vault_summaries - Request cached summaries",
+          "heartbeat - Keep connection alive"
+        ],
+        "server_to_client": [
+          "janet_response - Janet's reply to user",
+          "summary - Conversation summary after 'Thank you, Janet!'",
+          "summaries - List of Green Vault summaries",
+          "heartbeat_ack - Heartbeat acknowledgment"
+        ]
+      },
+      "usage": "Foundation for all real-time Janet communication across devices"
+    },
+    {
+      "id": "split_brain_memory",
+      "name": "Split-Brain Memory Architecture",
+      "category": "memory_management",
+      "date_discovered": "2026-02-28",
+      "status": "active",
+      "description": "Distributed memory model with ephemeral device context and authoritative server memory",
+      "architecture": {
+        "device_tier": {
+          "name": "Ephemeral Context",
+          "storage": "Device memory (UserDefaults)",
+          "contents": "Current conversation only",
+          "persistence": "Cleared after 'Thank you, Janet!'",
+          "size": "Small (<1 MB)"
+        },
+        "cache_tier": {
+          "name": "Cached Summaries",
+          "storage": "Device memory (UserDefaults)",
+          "contents": "Distilled summaries from Green Vault",
+          "persistence": "Synced from server",
+          "size": "Medium (~5-10 MB)"
+        },
+        "vault_tier": {
+          "name": "Green Vault (Authoritative)",
+          "storage": "Server (SQLite + ChromaDB)",
+          "contents": "Full conversation history",
+          "persistence": "Permanent",
+          "size": "Unlimited"
+        }
+      },
+      "benefits": [
+        "Minimal device storage requirements",
+        "Fast local access to recent context",
+        "Offline access to summaries",
+        "Single source of truth (server)",
+        "Privacy (full history never on device)",
+        "Scalability (devices stay lightweight)"
+      ],
+      "usage": "Enables Janet to work on resource-constrained devices while maintaining full memory on server"
+    }
+  ],
+    {
+      "id": "siri_integration",
+      "name": "Siri Shortcuts Integration",
+      "category": "system_integration",
+      "date_discovered": "2026-02-28",
+      "status": "active",
+      "description": "Deep Siri integration enabling 'Hey Siri, Call Janet' with context preservation and action execution",
+      "platforms": ["iOS 16.0+", "watchOS 9.0+"],
+      "key_features": [
+        "Siri activation via 'Hey Siri, Call Janet'",
+        "Intent handling (INStartCallIntent)",
+        "Shortcut donation for user phrases",
+        "Deep context beyond Siri's capabilities",
+        "Action execution (calls, messages, apps)",
+        "Visual handoff from Siri to Janet overlay",
+        "Context preservation across Siri sessions"
+      ],
+      "user_flows": [
+        {
+          "name": "Siri Activation",
+          "steps": [
+            "User: 'Hey Siri, Call Janet'",
+            "Siri activates Call Janet app",
+            "Janet overlay appears",
+            "Janet: 'Hi! I'm listening...'",
+            "User continues conversation with Janet"
+          ]
+        },
+        {
+          "name": "Siri Command with Action",
+          "steps": [
+            "User: 'Hey Siri, Call Janet'",
+            "User: 'Call Mom'",
+            "Janet looks up Mom in contacts",
+            "Janet initiates phone call",
+            "Call screen appears"
+          ]
+        }
+      ],
+      "advantages_over_siri": [
+        "Full conversation history (Green Vault)",
+        "Multi-turn dialogue",
+        "Customizable LLM (Ollama)",
+        "Local processing (privacy)",
+        "Visual overlay UI",
+        "Screenshot analysis",
+        "Extensible actions",
+        "Learning from interactions"
+      ],
+      "implementation_files": [
+        "platforms/ios/JanetOS-iOS/Sources/Intents/JanetIntents.swift",
+        "platforms/ios/JanetOS-iOS/Sources/Intents/SiriIntegration.swift"
+      ],
+      "documentation": "janet-seed/documentation/SIRI_ACCESSIBILITY_ABILITIES.md"
+    },
+    {
+      "id": "accessibility_phone_control",
+      "name": "Accessibility & Phone Control",
+      "category": "system_integration",
+      "date_discovered": "2026-02-28",
+      "status": "active",
+      "description": "System-level phone control via Accessibility APIs and URL schemes",
+      "platforms": ["iOS 16.0+"],
+      "key_features": [
+        "Screenshot capture and analysis",
+        "Phone call initiation via voice",
+        "Text message sending",
+        "App opening and navigation",
+        "URL scheme handling",
+        "Visual understanding of screen content"
+      ],
+      "capabilities": {
+        "screenshot": {
+          "method": "UIGraphicsImageRenderer",
+          "format": "PNG (base64)",
+          "use_cases": [
+            "Error message analysis",
+            "UI feedback",
+            "Code review",
+            "Document reading",
+            "Visual search"
+          ]
+        },
+        "phone_calls": {
+          "method": "tel:// URL scheme",
+          "integration": "Contacts framework",
+          "flow": "Voice command → Contact lookup → Call initiation"
+        },
+        "messages": {
+          "method": "sms:// URL scheme",
+          "features": "Pre-filled message body",
+          "flow": "Voice command → Message composition → User confirmation"
+        },
+        "app_control": {
+          "method": "URL schemes",
+          "examples": ["safari://", "maps://", "settings://"],
+          "flow": "Voice command → App opening"
+        }
+      },
+      "example_commands": [
+        "Take a screenshot",
+        "Call Mom",
+        "Send a message to John",
+        "Open Safari",
+        "What's on my screen?",
+        "Read this error message"
+      ],
+      "implementation_files": [
+        "platforms/ios/JanetOS-iOS/Sources/Accessibility/AccessibilityController.swift",
+        "platforms/ios/JanetOS-iOS/Sources/Intents/SiriIntegration.swift"
+      ],
+      "permissions_required": [
+        "Microphone (required)",
+        "Speech Recognition (required)",
+        "Siri & Search (optional, for Siri activation)",
+        "Contacts (optional, for calling contacts)",
+        "Photos (optional, for saving screenshots)"
+      ],
+      "documentation": "janet-seed/documentation/SIRI_ACCESSIBILITY_ABILITIES.md"
+    }
+  ],
+    {
+      "id": "offline_mode",
+      "name": "Full Offline Functionality",
+      "category": "core_capability",
+      "date_discovered": "2026-02-28",
+      "status": "active",
+      "description": "Complete offline operation with local processing, request queueing, and automatic sync",
+      "platforms": ["iOS 16.0+", "watchOS 9.0+"],
+      "key_features": [
+        "Automatic offline detection",
+        "Local LLM processing (rule-based + future Core ML)",
+        "Request queue with auto-sync",
+        "Persistent local storage",
+        "Visual offline indicators",
+        "Zero data loss",
+        "Works in airplane mode",
+        "Lower battery usage offline"
+      ],
+      "architecture": {
+        "detection": "Network.framework monitoring",
+        "processing": "LocalLLM (rule-based responses)",
+        "storage": "UserDefaults + FileManager",
+        "queue": "FIFO with 100 request limit",
+        "sync": "Automatic when reconnected"
+      },
+      "user_experience": {
+        "offline_transition": "Automatic with orange badge",
+        "online_transition": "Automatic sync + green badge",
+        "response_time": "<50ms (vs 100-500ms online)",
+        "battery_impact": "Lower than online mode"
+      },
+      "implementation_files": [
+        "platforms/ios/JanetOS-iOS/Sources/Core/OfflineManager.swift",
+        "platforms/ios/JanetOS-iOS/Sources/Core/LocalLLM.swift",
+        "platforms/ios/JanetOS-iOS/Sources/Views/OfflineIndicator.swift",
+        "platforms/ios/JanetOS-iOS/Sources/Core/ServerConnectionManager.swift (enhanced)",
+        "platforms/ios/JanetOS-iOS/Sources/Core/ConversationStore.swift (enhanced)"
+      ],
+      "use_cases": [
+        "Airplane mode / flights",
+        "Poor network areas",
+        "Privacy-sensitive conversations",
+        "Battery saving",
+        "Subway / underground",
+        "International travel (no roaming)"
+      ],
+      "future_enhancements": [
+        "Core ML on-device LLM",
+        "Offline file access (cached)",
+        "Peer-to-peer sync (Watch ↔ iPhone)",
+        "Offline learning",
+        "Mesh networking"
+      ],
+      "documentation": "platforms/ios/OFFLINE_MODE.md"
+    }
+  ],
+  "metadata": {
+    "last_updated": "2026-02-28",
+    "total_abilities": 7,
+    "active_abilities": 7,
+    "documentation_paths": [
+      "documentation/NEW_ABILITIES_2026_02_28.md",
+      "documentation/SIRI_ACCESSIBILITY_ABILITIES.md",
+      "platforms/ios/OFFLINE_MODE.md"
+    ],
+    "integration_status": "ready_for_janet_seed_integration",
+    "latest_additions": [
+      "siri_integration",
+      "accessibility_phone_control",
+      "offline_mode"
+    ]
+  }
+}

@@ -208,9 +208,9 @@ class DelegationManager:
         capability: HandlerCapability,
         task_description: str,
         input_data: Dict[str, Any],
+        result_callback: Callable[[DelegationResult], None],
         context: Optional[Dict[str, Any]] = None,
         confirm_callback: Optional[Callable[[str], bool]] = None,
-        result_callback: Callable[[DelegationResult], None],
         timeout: Optional[int] = None
     ) -> bool:
         """

@@ -57,6 +57,40 @@ It never installs itself elsewhere.
 - Companion approval
 - Explicit model availability
 
+### Level 4 — Mobile Presence (NEW - Feb 28, 2026)
+
+- Voice-first interaction on iPhone and Apple Watch
+- "Hey Janet!" wake word detection
+- Visual overlay UI (Hatsune Miku themed)
+- Split-brain architecture (thin client + server memory)
+- AirPods integration for hands-free use
+- Context window + cached summaries on device
+- Green Vault (MAIN MEMORY) on server
+- "Thank you, Janet!" conversation storage flow
+- WebSocket-based real-time communication
+
+**Requires:**
+
+- Mac server running Janet-seed + Ollama
+- iPhone (iOS 16.0+) or Apple Watch (watchOS 9.0+)
+- Local network connection (or Cloudflare Tunnel for remote)
+- Microphone and speech recognition permissions
+
+**Platforms:**
+
+- iOS (iPhone, iPad)
+- watchOS (Apple Watch with standalone mode)
+- Future: Android, Wear OS
+
+**Architecture:**
+
+```
+Mobile Device = Context Window + Cached Summaries (ephemeral)
+Mac Server = Green Vault + Ollama (authoritative, permanent)
+```
+
+**See:** `documentation/NEW_ABILITIES_2026_02_28.md` for complete details
+
 ## 🌱 Expansion Protocol (Consent-Based)
 
 Janet never expands herself.
