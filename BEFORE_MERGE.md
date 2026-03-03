@@ -48,6 +48,7 @@ Seed changes should be **small and reversible**.
 ## 🧪 Step 4: Test Thoughtfully
 
 Before submitting:
+- Run `pip install -r requirements.txt` before `pytest tests/`
 - Run the system locally (where applicable)
 - Verify no regressions in:
   - Red Thread behavior

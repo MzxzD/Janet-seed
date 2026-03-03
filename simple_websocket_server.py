@@ -8,9 +8,22 @@ import json
 import websockets
 import subprocess
 from datetime import datetime
+from src.handlers.shortcut_handler import ShortcutHandler
+
+# Import Red Thread event for constitutional integration (Axiom 8)
+try:
+    from src.core.janet_core import RED_THREAD_EVENT
+except ImportError:
+    try:
+        from core.janet_core import RED_THREAD_EVENT
+    except ImportError:
+        RED_THREAD_EVENT = None
 
 # Store for conversation context
 conversations = {}
+
+# Initialize shortcut handler
+shortcut_handler = None
 
 async def query_ollama(prompt: str) -> str:
     """Query Ollama LLM"""
@@ -27,6 +40,8 @@ async def query_ollama(prompt: str) -> str:
 
 async def handle_client(websocket):
     """Handle WebSocket client connection"""
+    global shortcut_handler
+    
     client_id = id(websocket)
     conversations[client_id] = []
     
@@ -40,12 +55,30 @@ async def handle_client(websocket):
                 
                 print(f"📨 Received: {msg_type}")
                 
+                # Axiom 8: Red Thread Protocol - block all operations when active
+                if RED_THREAD_EVENT and RED_THREAD_EVENT.is_set():
+                    await websocket.send(json.dumps({
+                        "type": "red_thread_active",
+                        "message": "Red Thread active - operations paused"
+                    }))
+                    continue
+                
                 if msg_type == 'user_message':
                     # User sent a message
                     user_text = data.get('text', '')
                     context_window = data.get('context_window', [])
                     
                     print(f"💬 User: {user_text}")
+                    
+                    # Axiom 8: Red Thread - detect "red thread" and activate
+                    if "red thread" in user_text.lower():
+                        if RED_THREAD_EVENT:
+                            RED_THREAD_EVENT.set()
+                        await websocket.send(json.dumps({
+                            "type": "red_thread_ack",
+                            "message": "Red Thread activated - all operations paused"
+                        }))
+                        continue
                     
                     # Query Ollama
                     response_text = await query_ollama(user_text)
@@ -97,6 +130,13 @@ async def handle_client(websocket):
                     # Heartbeat
                     await websocket.send(json.dumps({'type': 'heartbeat_ack'}))
                 
+                elif msg_type in ['recognize_intent', 'create_shortcut', 'build_shortcut',
+                                   'get_shortcuts', 'save_shortcut', 'delete_shortcut']:
+                    # Dynamic Shortcuts
+                    print(f"🔗 Handling shortcut message: {msg_type}")
+                    response = await shortcut_handler.handle_message(data)
+                    await websocket.send(json.dumps(response))
+                
                 else:
                     print(f"⚠️  Unknown message type: {msg_type}")
             
@@ -112,6 +152,8 @@ async def handle_client(websocket):
             del conversations[client_id]
 
 async def main():
+    global shortcut_handler
+    
     print("╔══════════════════════════════════════════════════════════════════════╗")
     print("║                                                                      ║")
     print("║              🧠 CALL JANET - WEBSOCKET SERVER 🧠                      ║")
@@ -124,6 +166,12 @@ async def main():
     print("")
     print("🧠 Using Ollama (qwen2) for responses")
     print("💚 Green Vault: In-memory (for testing)")
+    print("🔗 Dynamic Shortcuts: ENABLED")
+    print("")
+    
+    # Initialize shortcut handler
+    shortcut_handler = ShortcutHandler(memory_manager=None, llm=query_ollama)
+    print("✅ Shortcut handler initialized")
     print("")
     print("✅ Server ready! Waiting for iPhone connection...")
     print("")

@@ -5,9 +5,9 @@ Guides users through selecting summaries, providing consent, choosing model, and
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from .wizard_base import ExpansionWizard
-from ...memory.learning_manager import LearningManager
-from ...memory.llm_learner import LLMLearner
-from ..model_manager import ModelManager
+from memory.learning_manager import LearningManager
+from memory.llm_learner import LLMLearner
+from expansion.model_manager import ModelManager
 
 
 class LearningWizard(ExpansionWizard):

@@ -47,6 +47,12 @@ Test component interactions:
 
 ## Running Tests
 
+Install dependencies first:
+
+```bash
+pip install -r requirements.txt
+```
+
 ### All Tests
 
 ```bash
