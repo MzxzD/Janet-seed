@@ -283,6 +283,18 @@ class MemoryManager:
         
         return False
     
+    def undo_last(self) -> bool:
+        """
+        Undo the last Green Vault add or delete (JBJanet).
+
+        Returns:
+            True if undo succeeded, False otherwise
+        """
+        if RED_THREAD_EVENT and RED_THREAD_EVENT.is_set():
+            print("🔴 Red Thread active - undo blocked")
+            return False
+        return self.green_vault.undo_last_summary()
+
     def search(self, query: str, n_results: int = 5) -> List[Dict]:
         """
         Search memories semantically (Green Vault only).

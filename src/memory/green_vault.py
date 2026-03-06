@@ -23,6 +23,8 @@ import json
 
 from .chromadb_store import ChromaDBStore
 from .encrypted_sqlite import EncryptedSQLite
+from .version_store import VersionStore
+from .snapshot_manager import SnapshotManager
 
 # Import Red Thread event for constitutional integration (Axiom 8)
 try:
@@ -61,13 +63,20 @@ class GreenVault:
             self.memory_dir / "green_vault_chromadb",
             collection_name="green_vault_summaries"
         )
+        self.version_store = VersionStore(self.memory_dir, retention_days=30)
+        self.snapshot_manager = SnapshotManager(
+            self.memory_dir,
+            snapshot_path=self.memory_dir / "snapshots",
+            retention_daily=7,
+        )
     
     def add_summary(
         self,
         summary: str,
         tags: List[str],
         confidence: float,
-        expiry: Optional[datetime] = None
+        expiry: Optional[datetime] = None,
+        _record_version: bool = True
     ) -> str:
         """
         Add a distilled summary to Green Vault.
@@ -123,12 +132,27 @@ class GreenVault:
                 "type": "summary"
             }
             
-            chromadb_id = self.chromadb.store_memory(summary, metadata)
+            chromadb_id = self.chromadb.store_memory(summary, metadata, memory_id=entry_id)
             if chromadb_id is None:
                 # SQLite storage succeeded, but ChromaDB failed
                 # This is acceptable - episodic memory is more important
                 print("⚠️  Warning: Summary stored in SQLite but not in ChromaDB")
-            
+
+            if _record_version:
+                self.version_store.record_event(
+                    operation="add",
+                    entity_type="summary",
+                    entity_id=entry_id,
+                    payload_after={
+                        "summary": summary,
+                        "tags": tags,
+                        "confidence": confidence,
+                        "expiry": expiry_str,
+                        "memory_id": memory_id,
+                    },
+                )
+                self.version_store.prune_old_events()
+
             return entry_id
         except Exception as e:
             print(f"⚠️  Error storing summary in Green Vault: {e}")
@@ -187,12 +211,13 @@ class GreenVault:
             print(f"⚠️  Error querying Green Vault: {e}")
             return []
     
-    def delete_entry(self, entry_id: str) -> bool:
+    def delete_entry(self, entry_id: str, _record_version: bool = True) -> bool:
         """
         Delete an entry from Green Vault.
         
         Args:
             entry_id: Entry ID to delete
+            _record_version: If True, record event for JBJanet version history
         
         Returns:
             True if deleted, False otherwise
@@ -203,22 +228,43 @@ class GreenVault:
             return False
         
         try:
-            # Extract memory_id from entry_id (format: summary_{memory_id}_{timestamp})
+            payload_before = None
+            if _record_version:
+                summary_data = self.get_summary(entry_id)
+                if summary_data:
+                    payload_before = {
+                        "summary": summary_data.get("summary", ""),
+                        "tags": summary_data.get("tags", []),
+                        "confidence": summary_data.get("confidence", 0.0),
+                        "timestamp": summary_data.get("timestamp", ""),
+                        "metadata": summary_data.get("metadata", {}),
+                    }
+
+            success = False
             if entry_id.startswith("summary_"):
                 parts = entry_id.split("_")
                 if len(parts) >= 2:
                     try:
                         memory_id = int(parts[1])
-                        # Delete from SQLite
                         sqlite_success = self.sqlite.delete_memory(memory_id)
-                        # Delete from ChromaDB
                         chromadb_success = self.chromadb.delete_memory(entry_id)
-                        return sqlite_success or chromadb_success
+                        success = sqlite_success or chromadb_success
                     except (ValueError, IndexError):
                         pass
             
-            # Try direct ChromaDB deletion
-            return self.chromadb.delete_memory(entry_id)
+            if not success:
+                success = self.chromadb.delete_memory(entry_id)
+
+            if success and _record_version and payload_before:
+                self.version_store.record_event(
+                    operation="delete",
+                    entity_type="summary",
+                    entity_id=entry_id,
+                    payload_before=payload_before,
+                )
+                self.version_store.prune_old_events()
+
+            return success
         except Exception as e:
             print(f"⚠️  Error deleting entry from Green Vault: {e}")
             return False
@@ -380,6 +426,76 @@ class GreenVault:
             print(f"⚠️  Error getting summary: {e}")
             return None
     
+    def create_snapshot(self) -> Optional[str]:
+        """
+        Create a snapshot of Green Vault (JBJanet).
+        Stored in memory_dir/snapshots/YYYY-MM-DD_HH-MM/
+
+        Returns:
+            Snapshot ID if successful, None otherwise
+        """
+        return self.snapshot_manager.create_snapshot()
+
+    def list_snapshots(self) -> List[Dict]:
+        """List all Green Vault snapshots."""
+        return self.snapshot_manager.list_snapshots()
+
+    def restore_snapshot(self, snapshot_id: str, confirm: bool = True) -> bool:
+        """
+        Restore Green Vault from a snapshot.
+        Restart janet-seed after restore to use restored state.
+        """
+        return self.snapshot_manager.restore_snapshot(snapshot_id, confirm=confirm)
+
+    def undo_last_summary(self) -> bool:
+        """
+        Undo the last add or delete operation on Green Vault (JBJanet).
+
+        Returns:
+            True if undo succeeded, False if no event to undo or revert failed
+        """
+        if RED_THREAD_EVENT and RED_THREAD_EVENT.is_set():
+            print("🔴 Red Thread active - undo blocked")
+            return False
+
+        events = self.version_store.get_last_events(1)
+        if not events:
+            return False
+
+        event = events[0]
+        op = event.get("operation")
+        entity_type = event.get("entity_type")
+        entity_id = event.get("entity_id")
+        payload_before = event.get("payload_before")
+
+        if entity_type not in ("summary", "shortcut"):
+            return False
+
+        try:
+            if op == "add" and entity_id:
+                return self.delete_entry(entity_id, _record_version=False)
+            elif op == "delete" and payload_before:
+                expiry = None
+                if payload_before.get("metadata", {}).get("expiry"):
+                    try:
+                        expiry = datetime.fromisoformat(
+                            payload_before["metadata"]["expiry"].replace("Z", "+00:00")
+                        )
+                    except (ValueError, TypeError):
+                        pass
+                entry_id = self.add_summary(
+                    summary=payload_before.get("summary", ""),
+                    tags=payload_before.get("tags", []),
+                    confidence=payload_before.get("confidence", 0.0),
+                    expiry=expiry,
+                    _record_version=False,
+                )
+                return entry_id != ""
+            return False
+        except Exception as e:
+            print(f"⚠️  Error undoing last operation: {e}")
+            return False
+
     def get_all_summaries(self) -> List[Dict]:
         """
         Get all summaries from Green Vault.

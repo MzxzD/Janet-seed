@@ -15,6 +15,8 @@ from .distillation import ConversationDistiller
 from .learning_manager import LearningManager
 from .learning_audit import LearningAuditLogger
 from .llm_learner import LLMLearner
+from .version_store import VersionStore
+from .snapshot_manager import SnapshotManager
 
 __all__ = [
     'ChromaDBStore',
@@ -29,5 +31,7 @@ __all__ = [
     'LearningManager',
     'LearningAuditLogger',
     'LLMLearner',
+    'VersionStore',
+    'SnapshotManager',
 ]
 

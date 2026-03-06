@@ -67,13 +67,14 @@ class ChromaDBStore:
         """Check if ChromaDB is available."""
         return HAS_CHROMADB and self.collection is not None
     
-    def store_memory(self, text: str, metadata: Optional[Dict] = None) -> Optional[str]:
+    def store_memory(self, text: str, metadata: Optional[Dict] = None, memory_id: Optional[str] = None) -> Optional[str]:
         """
         Store text in vector database.
         
         Args:
             text: Text to store
             metadata: Additional metadata
+            memory_id: Optional custom ID (for Green Vault entry_id consistency)
         
         Returns:
             Memory ID if successful, None otherwise
@@ -82,7 +83,8 @@ class ChromaDBStore:
             return None
         
         try:
-            memory_id = f"memory_{datetime.utcnow().timestamp()}"
+            if memory_id is None:
+                memory_id = f"memory_{datetime.utcnow().timestamp()}"
             
             # Prepare metadata
             meta = metadata or {}
