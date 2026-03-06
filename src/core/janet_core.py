@@ -2,6 +2,7 @@
 J.A.N.E.T. Seed Core - Constitutional AI Companion Core Orchestrator
 """
 
+import os
 import threading
 import random
 from pathlib import Path
@@ -490,6 +491,8 @@ class JanetCore:
             # Configuration would be loaded from config file
             # For now, use defaults (can be configured later)
             self.delegation_manager = DelegationManager(
+                memory_manager=self.memory_manager,
+                media_url=os.environ.get("JANET_MEDIA_URL", "http://localhost:9872"),
                 require_confirmation=True  # Always require confirmation (Axiom 10: Soul Check)
             )
         except Exception as e:

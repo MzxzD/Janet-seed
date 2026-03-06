@@ -15,6 +15,7 @@ from .handlers.image_handler import ImageProcessingHandler
 from .handlers.home_automation_handler import HomeAutomationHandler
 from .handlers.home_assistant_dashboard_handler import HomeAssistantDashboardHandler
 from .handlers.blender_handler import BlenderHandler
+from .handlers.media_storage_handler import MediaStorageHandler
 from .litellm_router import LiteLLMRouter, TaskType
 from .n8n_client import N8NClient
 from .home_assistant import HomeAssistantClient
@@ -47,6 +48,8 @@ class DelegationManager:
         home_assistant_token: Optional[str] = None,
         blender_host: Optional[str] = None,
         blender_port: Optional[int] = None,
+        memory_manager=None,
+        media_url: str = "http://localhost:9872",
         require_confirmation: bool = True
     ):
         """
@@ -75,7 +78,8 @@ class DelegationManager:
         # Initialize built-in handlers
         self._initialize_handlers(
             home_assistant_url, home_assistant_token,
-            blender_host, blender_port
+            blender_host, blender_port,
+            memory_manager, media_url
         )
         
         # Delegation history
@@ -86,7 +90,9 @@ class DelegationManager:
         home_assistant_url: Optional[str],
         home_assistant_token: Optional[str],
         blender_host: Optional[str] = None,
-        blender_port: Optional[int] = None
+        blender_port: Optional[int] = None,
+        memory_manager=None,
+        media_url: str = "http://localhost:9872"
     ):
         """Initialize built-in handlers."""
         # Initialize n8n handler with workflow mappings
@@ -123,6 +129,10 @@ class DelegationManager:
         blender_client = BlenderClient(host=blender_host, port=blender_port)
         blender_handler = BlenderHandler(blender_client)
         self.register_handler(blender_handler)
+
+        # Initialize Media Storage handler (JanetMedia)
+        media_handler = MediaStorageHandler(media_url=media_url, memory_manager=memory_manager)
+        self.register_handler(media_handler)
     
     def register_handler(self, handler: DelegationHandler):
         """Register a delegation handler."""

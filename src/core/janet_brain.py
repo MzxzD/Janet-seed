@@ -518,6 +518,28 @@ class JanetBrain:
         
         user_lower = user_input.lower()
         
+        # Check for media storage (remember image/audio/video)
+        # Only delegate when file_path is in context (client shared a file)
+        media_storage_keywords = [
+            "remember this", "store this", "save this",
+            "remember this image", "remember this photo", "remember this picture",
+            "remember this song", "remember this audio", "remember this music",
+            "remember this video", "summarize this video", "store this video"
+        ]
+        if any(keyword in user_lower for keyword in media_storage_keywords):
+            file_path = context.get("file_path") if context else None
+            if file_path:
+                media_type = "image"
+                if "song" in user_lower or "audio" in user_lower or "music" in user_lower:
+                    media_type = "audio"
+                elif "video" in user_lower:
+                    media_type = "video"
+                return {
+                    "capability": HandlerCapability.MEDIA_STORAGE,
+                    "task_description": "Store media in Green Vault",
+                    "input_data": {"file_path": file_path, "media_type": media_type, "user_query": user_input}
+                }
+
         # Check for image processing requests
         image_keywords = ["image", "picture", "photo", "analyze image", "look at", "see this"]
         if any(keyword in user_lower for keyword in image_keywords):

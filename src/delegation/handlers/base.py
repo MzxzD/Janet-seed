@@ -13,6 +13,7 @@ class HandlerCapability(Enum):
     """Capabilities a handler can provide."""
     IMAGE_PROCESSING = "image_processing"
     IMAGE_GENERATION = "image_generation"
+    MEDIA_STORAGE = "media_storage"
     VIDEO_PROCESSING = "video_processing"
     AUDIO_PROCESSING = "audio_processing"
     HOME_AUTOMATION = "home_automation"
