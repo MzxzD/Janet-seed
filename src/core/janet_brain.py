@@ -1,11 +1,22 @@
 """
 JanetBrain - Primary LLM Response Generator
 Always-on brain for Janet that coordinates all interactions and delegates tasks.
+
+Enhanced with:
+- Multi-model support (Llama 3, Mistral, TinyLlama, etc.)
+- Model switching with performance tracking
+- Intelligent caching strategies
+- Request prioritization
 """
-from typing import Dict, Optional, List, Callable, Any
+from __future__ import annotations
+from typing import Dict, Optional, List, Callable, Any, Tuple, TYPE_CHECKING
 from pathlib import Path
 import threading
 import time
+import json
+from dataclasses import dataclass, asdict
+from collections import deque
+from enum import Enum
 
 try:
     import litellm
@@ -18,18 +29,150 @@ try:
 except ImportError:
     RED_THREAD_EVENT = None
 
+if TYPE_CHECKING:
+    from src.delegation.delegation_manager import DelegationManager
+    from src.delegation.handlers.base import HandlerCapability
+
 try:
-    from delegation import DelegationManager, HandlerCapability
+    from src.delegation.delegation_manager import DelegationManager
+    from src.delegation.handlers.base import HandlerCapability
     DELEGATION_AVAILABLE = True
 except ImportError:
     DELEGATION_AVAILABLE = False
+    DelegationManager = None
+    HandlerCapability = None
+
+
+# MARK: - Supporting Classes
+
+class ModelType(Enum):
+    """Supported Ollama models"""
+    TINYLLAMA = "tinyllama:1.1b"
+    LLAMA3_8B = "llama3:8b"
+    LLAMA3_70B = "llama3:70b"
+    MISTRAL = "mistral:7b"
+    MIXTRAL = "mixtral:8x7b"
+    PHI3 = "phi3:mini"
+    GEMMA = "gemma:7b"
+    
+    @property
+    def display_name(self) -> str:
+        return self.value.replace(":", " ").title()
+
+
+@dataclass
+class ModelPerformance:
+    """Track performance metrics for a model"""
+    model_name: str
+    total_requests: int = 0
+    total_tokens: int = 0
+    total_duration: float = 0.0
+    average_latency: float = 0.0
+    success_rate: float = 1.0
+    failures: int = 0
+    
+    def record_request(self, duration: float, tokens: int, success: bool = True):
+        """Record a request's performance"""
+        self.total_requests += 1
+        self.total_duration += duration
+        self.total_tokens += tokens
+        
+        if not success:
+            self.failures += 1
+        
+        self.average_latency = self.total_duration / self.total_requests
+        self.success_rate = (self.total_requests - self.failures) / self.total_requests
+    
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+
+class RequestPriority(Enum):
+    """Priority levels for request processing"""
+    CRITICAL = 0  # Red Thread, emergency
+    HIGH = 1      # User-facing, interactive
+    NORMAL = 2    # Standard requests
+    LOW = 3       # Background tasks
+    BATCH = 4     # Batch processing
+
+
+@dataclass
+class PrioritizedRequest:
+    """Request with priority and metadata"""
+    user_input: str
+    context: Optional[Dict]
+    priority: RequestPriority
+    timestamp: float
+    callback: Optional[Callable] = None
+    
+    def __lt__(self, other):
+        # Lower priority value = higher priority
+        if self.priority.value != other.priority.value:
+            return self.priority.value < other.priority.value
+        # Same priority: FIFO
+        return self.timestamp < other.timestamp
+
+
+class ResponseCache:
+    """LRU cache for responses with semantic similarity"""
+    def __init__(self, max_size: int = 100):
+        self.cache: deque = deque(maxlen=max_size)
+        self.hits = 0
+        self.misses = 0
+    
+    def get(self, user_input: str, context: Optional[Dict] = None) -> Optional[str]:
+        """Get cached response if available"""
+        cache_key = self._make_key(user_input, context)
+        
+        for item in self.cache:
+            if item["key"] == cache_key:
+                self.hits += 1
+                # Move to end (most recently used)
+                self.cache.remove(item)
+                self.cache.append(item)
+                return item["response"]
+        
+        self.misses += 1
+        return None
+    
+    def put(self, user_input: str, response: str, context: Optional[Dict] = None):
+        """Cache a response"""
+        cache_key = self._make_key(user_input, context)
+        self.cache.append({
+            "key": cache_key,
+            "response": response,
+            "timestamp": time.time()
+        })
+    
+    def _make_key(self, user_input: str, context: Optional[Dict]) -> str:
+        """Create cache key from input and context"""
+        # Simple key for now - could use embeddings for semantic similarity
+        context_str = json.dumps(context, sort_keys=True) if context else ""
+        return f"{user_input.lower().strip()}:{context_str}"
+    
+    @property
+    def hit_rate(self) -> float:
+        total = self.hits + self.misses
+        return self.hits / total if total > 0 else 0.0
+    
+    def stats(self) -> Dict:
+        return {
+            "size": len(self.cache),
+            "hits": self.hits,
+            "misses": self.misses,
+            "hit_rate": self.hit_rate
+        }
 
 
 class JanetBrain:
     """
     Janet's primary brain - always-on LLM response generator.
     
-    This is the core intelligence that:
+    Enhanced features:
+    - Multi-model support with hot-swapping
+    - Performance tracking and comparison
+    - Intelligent caching with LRU eviction
+    - Request prioritization
     - Generates all conversational responses
     - Detects when delegation is needed
     - Coordinates async workflows
@@ -61,16 +204,23 @@ class JanetBrain:
         self.conversation_active: bool = False
         self.max_context_messages: int = 20  # Limit conversation history to prevent token overflow
         
+        # Enhanced features
+        self.available_models: List[str] = []
+        self.model_performance: Dict[str, ModelPerformance] = {}
+        self.response_cache = ResponseCache(max_size=100)
+        self.request_queue: List[PrioritizedRequest] = []
+        self.queue_lock = threading.Lock()
+        
         # Initialize model
         self._initialize_model()
     
     def _initialize_model(self):
-        """Initialize the LLM model."""
+        """Initialize the LLM model and discover available models."""
         if not HAS_LITELLM:
             print("⚠️  LiteLLM not available. JanetBrain will not function.")
             return
         
-        # Check if Ollama is available
+        # Check if Ollama is available and discover models
         try:
             import subprocess
             result = subprocess.run(
@@ -80,13 +230,24 @@ class JanetBrain:
                 timeout=5
             )
             if result.returncode == 0:
-                # Check if model is available
-                if self.model_name in result.stdout:
+                # Parse available models
+                lines = result.stdout.strip().split('\n')[1:]  # Skip header
+                self.available_models = [line.split()[0] for line in lines if line.strip()]
+                
+                # Check if current model is available
+                if self.model_name in self.available_models:
                     self.available = True
                     print(f"✅ JanetBrain initialized with {self.model_name}")
+                    print(f"   Available models: {', '.join(self.available_models)}")
+                    
+                    # Initialize performance tracking for all models
+                    for model in self.available_models:
+                        self.model_performance[model] = ModelPerformance(model_name=model)
                 else:
                     print(f"⚠️  Model {self.model_name} not found. Please install it.")
                     print(f"   Run: ollama pull {self.model_name}")
+                    if self.available_models:
+                        print(f"   Available: {', '.join(self.available_models)}")
             else:
                 print("⚠️  Ollama not available. JanetBrain will not function.")
         except Exception as e:
@@ -96,6 +257,74 @@ class JanetBrain:
     def is_available(self) -> bool:
         """Check if JanetBrain is available."""
         return self.available and HAS_LITELLM
+    
+    def switch_model(self, model_name: str) -> bool:
+        """
+        Switch to a different Ollama model.
+        
+        Args:
+            model_name: Name of the model to switch to
+            
+        Returns:
+            True if switch successful, False otherwise
+        """
+        if model_name not in self.available_models:
+            print(f"⚠️  Model {model_name} not available")
+            print(f"   Available: {', '.join(self.available_models)}")
+            return False
+        
+        old_model = self.model_name
+        self.model_name = model_name
+        
+        # Initialize performance tracking if needed
+        if model_name not in self.model_performance:
+            self.model_performance[model_name] = ModelPerformance(model_name=model_name)
+        
+        print(f"✅ Switched from {old_model} to {model_name}")
+        return True
+    
+    def get_model_comparison(self) -> Dict[str, Dict]:
+        """
+        Get performance comparison of all models.
+        
+        Returns:
+            Dictionary of model names to performance metrics
+        """
+        return {
+            model: perf.to_dict() 
+            for model, perf in self.model_performance.items()
+            if perf.total_requests > 0
+        }
+    
+    def get_best_model(self, metric: str = "latency") -> Optional[str]:
+        """
+        Get the best performing model based on a metric.
+        
+        Args:
+            metric: "latency", "success_rate", or "tokens_per_second"
+            
+        Returns:
+            Name of best model or None
+        """
+        models_with_data = {
+            name: perf for name, perf in self.model_performance.items()
+            if perf.total_requests > 0
+        }
+        
+        if not models_with_data:
+            return None
+        
+        if metric == "latency":
+            return min(models_with_data.items(), key=lambda x: x[1].average_latency)[0]
+        elif metric == "success_rate":
+            return max(models_with_data.items(), key=lambda x: x[1].success_rate)[0]
+        elif metric == "tokens_per_second":
+            return max(
+                models_with_data.items(),
+                key=lambda x: x[1].total_tokens / x[1].total_duration if x[1].total_duration > 0 else 0
+            )[0]
+        
+        return None
     
     def start_conversation(self):
         """Start a new conversation session with empty context window."""
@@ -134,20 +363,23 @@ class JanetBrain:
     def generate_response(
         self,
         user_input: str,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        priority: RequestPriority = RequestPriority.NORMAL
     ) -> str:
         """
-        Generate response to user input.
+        Generate response to user input with caching and prioritization.
         
         This is the primary method that:
-        1. Checks for delegation needs
-        2. Generates LLM response
-        3. Coordinates async workflows
-        4. Returns final response
+        1. Checks cache for quick responses
+        2. Checks for delegation needs
+        3. Generates LLM response with performance tracking
+        4. Coordinates async workflows
+        5. Returns final response
         
         Args:
             user_input: User's input text
             context: Additional context (memory, tone, etc.)
+            priority: Request priority level
             
         Returns:
             Generated response text
@@ -159,6 +391,13 @@ class JanetBrain:
         if not self.is_available():
             return "I'm sorry, my brain is not available right now. Please check if Ollama is installed and the model is available."
         
+        # Check cache first (for non-critical requests)
+        if priority != RequestPriority.CRITICAL:
+            cached_response = self.response_cache.get(user_input, context)
+            if cached_response:
+                print("⚡️ Cache hit - instant response")
+                return cached_response
+        
         # Build prompt with context
         prompt = self._build_prompt(user_input, context)
         
@@ -168,7 +407,8 @@ class JanetBrain:
             # Handle delegation (async or sync)
             return self._handle_delegation(user_input, delegation_result, context)
         
-        # Generate response using LLM with conversation history
+        # Generate response using LLM with conversation history and performance tracking
+        start_time = time.time()
         try:
             # Add user message to history before LLM call (for context)
             if self.conversation_active:
@@ -201,17 +441,47 @@ class JanetBrain:
                 max_tokens=500
             )
             
+            duration = time.time() - start_time
+            
             if response and response.choices:
                 response_text = response.choices[0].message.content.strip()
+                
+                # Track performance
+                tokens = response.usage.total_tokens if hasattr(response, 'usage') else 0
+                if self.model_name in self.model_performance:
+                    self.model_performance[self.model_name].record_request(
+                        duration=duration,
+                        tokens=tokens,
+                        success=True
+                    )
+                
+                # Cache the response
+                self.response_cache.put(user_input, response_text, context)
                 
                 # Add assistant response to conversation history
                 if self.conversation_active:
                     self.add_to_history("assistant", response_text)
                 
+                print(f"⚡️ Response generated in {duration:.2f}s ({tokens} tokens)")
                 return response_text
             else:
+                # Track failure
+                if self.model_name in self.model_performance:
+                    self.model_performance[self.model_name].record_request(
+                        duration=duration,
+                        tokens=0,
+                        success=False
+                    )
                 return "I'm having trouble generating a response right now."
         except Exception as e:
+            duration = time.time() - start_time
+            # Track failure
+            if self.model_name in self.model_performance:
+                self.model_performance[self.model_name].record_request(
+                    duration=duration,
+                    tokens=0,
+                    success=False
+                )
             print(f"⚠️  LLM generation failed: {e}")
             return "I'm sorry, I encountered an error generating a response."
     
@@ -257,8 +527,17 @@ class JanetBrain:
                 "input_data": {"user_query": user_input}
             }
         
-        # Check for home automation requests
-        ha_keywords = ["turn on", "turn off", "lights", "thermostat", "home assistant", "smart home"]
+        # Check for Home Assistant dashboard requests
+        dashboard_keywords = ["dashboard", "open home assistant", "show home assistant", "ha dashboard"]
+        if any(keyword in user_lower for keyword in dashboard_keywords):
+            return {
+                "capability": HandlerCapability.HOME_AUTOMATION,
+                "task_description": f"Home Assistant dashboard: {user_input}",
+                "input_data": {"user_query": user_input}
+            }
+        
+        # Check for home automation device control requests
+        ha_keywords = ["turn on", "turn off", "lights", "thermostat", "smart home"]
         if any(keyword in user_lower for keyword in ha_keywords):
             # Parse home automation command
             domain = "light"  # Default
@@ -285,6 +564,19 @@ class JanetBrain:
                     "service": service,
                     "entity_id": entity_id
                 }
+            }
+
+        # Check for 3D modelling / Blender requests
+        blender_keywords = [
+            "blender", "3d", "create in 3d", "model in 3d",
+            "create a scene", "make a 3d", "add a cube", "add cube",
+            "add a sphere", "add sphere", "create a cube", "create cube"
+        ]
+        if any(keyword in user_lower for keyword in blender_keywords):
+            return {
+                "capability": HandlerCapability.THREE_D_MODELLING,
+                "task_description": f"3D modelling: {user_input}",
+                "input_data": {"user_query": user_input}
             }
         
         return None
@@ -412,4 +704,27 @@ Generate a natural, conversational response acknowledging the completion."""
             context=context,
             result_callback=handle_result
         )
+    
+    def get_performance_stats(self) -> Dict[str, Any]:
+        """
+        Get comprehensive performance statistics.
+        
+        Returns:
+            Dictionary with performance metrics
+        """
+        return {
+            "current_model": self.model_name,
+            "available_models": self.available_models,
+            "model_performance": self.get_model_comparison(),
+            "cache_stats": self.response_cache.stats(),
+            "conversation_active": self.conversation_active,
+            "conversation_length": len(self.conversation_history),
+            "best_model_latency": self.get_best_model("latency"),
+            "best_model_success": self.get_best_model("success_rate")
+        }
+    
+    def clear_cache(self):
+        """Clear the response cache."""
+        self.response_cache = ResponseCache(max_size=100)
+        print("✅ Response cache cleared")
 

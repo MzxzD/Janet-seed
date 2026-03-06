@@ -1,0 +1,23 @@
+# Janet-seed core dependencies (minimal install - fast)
+# Use requirements.txt for full install (voice, ChromaDB, learning)
+
+# Core
+psutil>=5.9.0
+pyyaml>=6.0
+cryptography>=41.0.0
+numpy>=1.24.0
+
+# API Server (janet-api-server, IDE integration)
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# Home Assistant API
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# LLM routing (Ollama, LiteLLM)
+litellm>=1.0.0
+requests>=2.31.0
+
+# WebSocket
+websockets>=11.0.0

@@ -16,12 +16,14 @@ Handlers are modular components that:
 flowchart TB
     Base[DelegationHandler<br/>Abstract Base Class] --> ImageHandler[ImageProcessingHandler]
     Base --> HomeHandler[HomeAutomationHandler]
+    Base --> BlenderHandler[BlenderHandler]
     Base --> N8NHandler[N8NDelegationHandler]
     Base --> CustomHandler[Custom Handlers]
     
     ImageHandler --> N8NHandler
     HomeHandler --> N8NHandler
     HomeHandler --> HAClient[HomeAssistantClient]
+    BlenderHandler --> BlenderClient[BlenderClient]
     N8NHandler --> N8NClient[N8NClient]
     
     All[All Handlers] --> Registry[Handler Registry<br/>in DelegationManager]
@@ -88,6 +90,17 @@ flowchart TD
     N8N --> Result[Control Result]
     HA --> Result
 ```
+
+### BlenderHandler
+
+3D modelling via Blender MCP addon.
+
+**Capabilities:**
+- `THREE_D_MODELLING` - Create objects in Blender (cube, sphere, cylinder, etc.)
+
+**Setup:** Blender must be running with the Blender MCP addon installed and connected (localhost:9876). Say "Hey Janet, add a cube in Blender" to trigger.
+
+**Supported commands:** cube, sphere, cylinder, cone, plane, torus, monkey (Suzanne), clear scene.
 
 ### N8NDelegationHandler
 

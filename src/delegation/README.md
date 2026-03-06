@@ -8,6 +8,7 @@ The delegation system enables:
 - **Model Routing**: Route tasks to specialized LLMs (programming, deep thinking)
 - **Image Processing**: Handle image analysis and generation via n8n
 - **Home Automation**: Control smart home devices via n8n or Home Assistant
+- **3D Modelling**: Control Blender via MCP addon (create objects, execute Python in Blender)
 - **Extensible Handlers**: Plugin-based architecture for adding new capabilities
 - **Async Support**: Background task execution with callbacks
 
@@ -21,12 +22,14 @@ flowchart TB
     
     HandlerRegistry --> ImageHandler[Image Handler<br/>Image Processing]
     HandlerRegistry --> HomeHandler[Home Automation Handler<br/>Smart Home Control]
+    HandlerRegistry --> BlenderHandler[Blender Handler<br/>3D Modelling]
     HandlerRegistry --> N8NHandler[N8N Handler<br/>Workflow Routing]
     HandlerRegistry --> ModelRouter[LiteLLM Router<br/>Model Routing]
     
     ImageHandler --> N8NHandler
     HomeHandler --> N8NHandler
     HomeHandler --> HomeAssistant[Home Assistant<br/>REST API]
+    BlenderHandler --> BlenderClient[Blender Addon<br/>localhost:9876]
     N8NHandler --> N8NClient[N8N Client<br/>Webhook Calls]
     ModelRouter --> Ollama[Ollama Models<br/>Specialized LLMs]
 ```
@@ -99,6 +102,7 @@ class DelegationHandler(ABC):
 - `IMAGE_PROCESSING` - Image analysis and processing
 - `IMAGE_GENERATION` - Image generation
 - `HOME_AUTOMATION` - Smart home control
+- `THREE_D_MODELLING` - 3D modelling via Blender (Blender must be running with MCP addon connected)
 - `MODEL_INFERENCE` - Specialized LLM routing
 - `CUSTOM` - Custom capabilities
 
@@ -132,6 +136,16 @@ flowchart TD
     N8NWorkflow --> Result[Control Result]
     HAREST --> Result
 ```
+
+#### BlenderHandler
+
+Controls Blender 3D via the Blender MCP addon socket:
+
+- Connects to Blender addon at localhost:9876 (configurable via BLENDER_HOST, BLENDER_PORT)
+- Maps natural language ("add a cube", "create a sphere") to Blender Python API
+- Uses execute_code to run Python in Blender's context
+
+**Setup:** Blender must be running with the Blender MCP addon installed and connected.
 
 #### N8NDelegationHandler
 
@@ -335,6 +349,8 @@ class CustomHandler(DelegationHandler):
 - `handlers/n8n_handler.py` - n8n workflow handler
 - `handlers/image_handler.py` - Image processing handler
 - `handlers/home_automation_handler.py` - Home automation handler
+- `handlers/blender_handler.py` - Blender 3D modelling handler
+- `blender_client.py` - Blender addon socket client
 
 ## See Also
 

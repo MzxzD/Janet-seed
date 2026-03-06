@@ -21,6 +21,14 @@ scipy>=1.11.0
 litellm>=1.0.0
 requests>=2.31.0
 
+# IDE Integration - API Server
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# Home Assistant API
+flask>=3.0.0
+flask-cors>=4.0.0
+
 # Learning/Fine-Tuning (Optional - for Green Vault learning)
 # Note: These are only needed if you plan to fine-tune models
 # They are large packages and may take time to install
@@ -33,4 +41,5 @@ datasets>=2.14.0
 # Development
 black>=23.0.0
 mypy>=1.0.0
-pytest-cov>=4.0.0websockets>=11.0.0
+pytest-cov>=4.0.0
+websockets>=11.0.0

@@ -13,9 +13,12 @@ from .handlers.base import (
 from .handlers.n8n_handler import N8NDelegationHandler
 from .handlers.image_handler import ImageProcessingHandler
 from .handlers.home_automation_handler import HomeAutomationHandler
+from .handlers.home_assistant_dashboard_handler import HomeAssistantDashboardHandler
+from .handlers.blender_handler import BlenderHandler
 from .litellm_router import LiteLLMRouter, TaskType
 from .n8n_client import N8NClient
 from .home_assistant import HomeAssistantClient
+from .blender_client import BlenderClient
 
 # Import Red Thread event for constitutional integration (Axiom 8)
 try:
@@ -42,6 +45,8 @@ class DelegationManager:
         n8n_api_key: Optional[str] = None,
         home_assistant_url: Optional[str] = None,
         home_assistant_token: Optional[str] = None,
+        blender_host: Optional[str] = None,
+        blender_port: Optional[int] = None,
         require_confirmation: bool = True
     ):
         """
@@ -53,6 +58,8 @@ class DelegationManager:
             n8n_api_key: n8n API key
             home_assistant_url: Home Assistant URL
             home_assistant_token: Home Assistant access token
+            blender_host: Blender addon host (default: BLENDER_HOST env or localhost)
+            blender_port: Blender addon port (default: BLENDER_PORT env or 9876)
             require_confirmation: Whether to require confirmation for delegations
         """
         self.require_confirmation = require_confirmation
@@ -66,7 +73,10 @@ class DelegationManager:
         self.capability_map: Dict[HandlerCapability, List[DelegationHandler]] = {}
         
         # Initialize built-in handlers
-        self._initialize_handlers(home_assistant_url, home_assistant_token)
+        self._initialize_handlers(
+            home_assistant_url, home_assistant_token,
+            blender_host, blender_port
+        )
         
         # Delegation history
         self.delegation_history: List[Dict] = []
@@ -74,7 +84,9 @@ class DelegationManager:
     def _initialize_handlers(
         self,
         home_assistant_url: Optional[str],
-        home_assistant_token: Optional[str]
+        home_assistant_token: Optional[str],
+        blender_host: Optional[str] = None,
+        blender_port: Optional[int] = None
     ):
         """Initialize built-in handlers."""
         # Initialize n8n handler with workflow mappings
@@ -101,6 +113,16 @@ class DelegationManager:
         )
         ha_handler = HomeAutomationHandler(n8n_handler, home_assistant)
         self.register_handler(ha_handler)
+        
+        # Initialize Home Assistant dashboard handler
+        if home_assistant:
+            dashboard_handler = HomeAssistantDashboardHandler(home_assistant)
+            self.register_handler(dashboard_handler)
+
+        # Initialize Blender 3D modelling handler
+        blender_client = BlenderClient(host=blender_host, port=blender_port)
+        blender_handler = BlenderHandler(blender_client)
+        self.register_handler(blender_handler)
     
     def register_handler(self, handler: DelegationHandler):
         """Register a delegation handler."""

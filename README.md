@@ -213,6 +213,48 @@ See [CAPABILITIES.md](CAPABILITIES.md) and [documentation/EXPANSION_GUIDE.md](do
 - **[Axiom Implementation](documentation/AXIOM_IMPLEMENTATION.md)** — Technical details on constitutional axioms
 - **[Build Order](documentation/BUILD_ORDER.md)** — Development timeline and milestones
 - **[Contributing](documentation/CONTRIBUTING.md)** — Contribution guidelines
+- **[API Reference](API_REFERENCE.md)** — OpenAI-compatible API documentation
+
+### IDE Integration
+
+- **[📚 Documentation Index](JANET_IDE_INDEX.md)** — **START HERE** - Complete guide to all IDE docs
+- **[⚡ Quick Start](QUICK_START_IDE.md)** — Get running in 5 minutes
+- **[📖 Complete Guide](JANET_IDE_COMPLETE_GUIDE.md)** — Master documentation (everything in one place)
+- **[🔧 Setup Guide](JANET_IDE_SETUP.md)** — Detailed installation and configuration
+- **[📡 API Reference](API_REFERENCE.md)** — Complete API documentation
+- **[📊 Implementation Summary](IMPLEMENTATION_SUMMARY.md)** — Technical overview
+- **[API Server](janet_api_server.py)** — OpenAI-compatible HTTP API server
+- **[API Tests](test_janet_api.py)** — API testing and verification
+- **[Continue.dev Config](~/.continue/config.yaml)** — VSCode extension configuration
+
+## 🖥️ IDE Integration (New!)
+
+**Use Janet as your AI coding assistant in VSCode!**
+
+Janet now includes an OpenAI-compatible API server that works with Continue.dev to provide:
+- 💬 **Chat Interface** (Cmd+L) - Conversational coding assistance
+- ✏️ **Inline Editing** (Cmd+K) - AI-powered code modifications  
+- ⚡ **Autocomplete** - Real-time code suggestions
+- 🔍 **Codebase Context** - Semantic search with @-mentions
+
+### Quick Start
+
+```bash
+# 1. Start Janet API server
+./start_janet_api.sh
+
+# 2. Install Continue.dev extension in VSCode
+# 3. Configuration is already set up at ~/.continue/config.yaml
+# 4. Start coding with Janet!
+```
+
+**Features:**
+- ✅ Offline-first - All processing local, no cloud
+- ✅ Privacy-first - Your code never leaves your machine
+- ✅ Constitutional AI - Follows 16 axioms
+- ✅ Multi-model support - Fast/balanced/powerful models
+
+**See [JANET_IDE_SETUP.md](JANET_IDE_SETUP.md) for complete setup instructions.**
 
 ## 🔧 Developer Quick Start
 

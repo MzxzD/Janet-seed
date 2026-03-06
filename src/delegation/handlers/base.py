@@ -22,6 +22,7 @@ class HandlerCapability(Enum):
     MODEL_INFERENCE = "model_inference"
     DATA_ANALYSIS = "data_analysis"
     WEB_SEARCH = "web_search"
+    THREE_D_MODELLING = "three_d_modelling"
     CUSTOM = "custom"
 
 
