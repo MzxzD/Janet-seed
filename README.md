@@ -210,6 +210,7 @@ See [CAPABILITIES.md](CAPABILITIES.md) and [documentation/EXPANSION_GUIDE.md](do
 
 ### Technical Documentation
 
+- **[JANET Files](documentation/JANET_FILES.md)** — Main reference for `.janet` source files and `~/.janet` directory
 - **[Axiom Implementation](documentation/AXIOM_IMPLEMENTATION.md)** — Technical details on constitutional axioms
 - **[Build Order](documentation/BUILD_ORDER.md)** — Development timeline and milestones
 - **[Contributing](documentation/CONTRIBUTING.md)** — Contribution guidelines
