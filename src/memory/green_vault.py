@@ -76,6 +76,7 @@ class GreenVault:
         tags: List[str],
         confidence: float,
         expiry: Optional[datetime] = None,
+        metadata: Optional[Dict] = None,
         _record_version: bool = True
     ) -> str:
         """
@@ -86,6 +87,7 @@ class GreenVault:
             tags: List of topic tags
             confidence: Confidence score (0.0-1.0)
             expiry: Optional expiry date for the entry
+            metadata: Optional extra metadata (e.g. media_reference for NAS path)
         
         Returns:
             Entry ID if successful, empty string otherwise
@@ -110,6 +112,8 @@ class GreenVault:
                 "expiry": expiry_str,
                 "type": "summary"
             }
+            if metadata:
+                context.update(metadata)
             
             # Store summary as both input and response (for compatibility)
             memory_id = self.sqlite.store_memory(
@@ -123,7 +127,7 @@ class GreenVault:
             
             # Store in ChromaDB for semantic search
             entry_id = f"summary_{memory_id}_{timestamp}"
-            metadata = {
+            db_metadata = {
                 "memory_id": str(memory_id),
                 "tags": json.dumps(tags),
                 "confidence": str(confidence),
@@ -131,8 +135,11 @@ class GreenVault:
                 "timestamp": timestamp,
                 "type": "summary"
             }
+            if metadata:
+                for k, v in metadata.items():
+                    db_metadata[k] = str(v) if not isinstance(v, str) else v
             
-            chromadb_id = self.chromadb.store_memory(summary, metadata, memory_id=entry_id)
+            chromadb_id = self.chromadb.store_memory(summary, db_metadata, memory_id=entry_id)
             if chromadb_id is None:
                 # SQLite storage succeeded, but ChromaDB failed
                 # This is acceptable - episodic memory is more important
@@ -149,6 +156,7 @@ class GreenVault:
                         "confidence": confidence,
                         "expiry": expiry_str,
                         "memory_id": memory_id,
+                        "metadata": metadata or {},
                     },
                 )
                 self.version_store.prune_old_events()
@@ -488,6 +496,7 @@ class GreenVault:
                     tags=payload_before.get("tags", []),
                     confidence=payload_before.get("confidence", 0.0),
                     expiry=expiry,
+                    metadata=payload_before.get("metadata"),
                     _record_version=False,
                 )
                 return entry_id != ""
