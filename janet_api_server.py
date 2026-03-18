@@ -15,6 +15,8 @@ from pathlib import Path
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
+# Add JanetOS root for core (privilege_guard, cloud_permission_guard)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 try:
     from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect
@@ -40,10 +42,11 @@ except ImportError:
 API_PORT = int(os.getenv("JANET_API_PORT", "8080"))
 API_HOST = os.getenv("JANET_API_HOST", "0.0.0.0")
 API_KEY = os.getenv("JANET_API_KEY", "janet-local-dev")  # Optional authentication
-DEFAULT_MODEL = os.getenv("JANET_DEFAULT_MODEL", "tinyllama:1.1b")
+DEFAULT_MODEL = os.getenv("JANET_DEFAULT_MODEL", "qwen2.5-coder:7b")
 
-# Global JanetBrain instance (shared across requests)
+# Global instances
 janet_brain: Optional[JanetBrain] = None
+memory_manager = None  # MemoryManager for Green Vault (lazy init)
 
 # Session management (conversation context per session)
 sessions: Dict[str, Dict[str, Any]] = {}
@@ -80,6 +83,7 @@ class ChatCompletionRequest(BaseModel):
     top_p: Optional[float] = 1.0
     frequency_penalty: Optional[float] = 0.0
     presence_penalty: Optional[float] = 0.0
+    session_id: Optional[str] = None  # AC-GV1: chat_id for Green Vault / inactivity flush
 
 
 class ChatCompletionChoice(BaseModel):
@@ -115,6 +119,33 @@ class ModelsResponse(BaseModel):
     data: List[ModelInfo]
 
 
+class LearnRequest(BaseModel):
+    """Request body for POST /api/learn (JanetXMzNN Double Soul - Green Vault ingestion)"""
+    content: str = Field(..., description="Summary or extracted text to store")
+    context: str = Field(default="media_digestion", description="Context tag (e.g. media_digestion, cve_upgrade)")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Source, type, digest_date")
+
+
+class LearnResponse(BaseModel):
+    """Response for POST /api/learn"""
+    status: str
+    memory_id: Optional[str] = None
+    stored: bool
+
+
+class CloudAllowRequest(BaseModel):
+    """Request for POST /api/cloud-allow"""
+    scope: str = Field(..., description="Scope (e.g. youtube)")
+    grant: bool = Field(..., description="Grant or revoke")
+    id_verified: bool = Field(default=False, description="ID verification passed")
+
+
+class CloudIdVerifyRequest(BaseModel):
+    """Request for POST /api/cloud-id-verify"""
+    method: str = Field(default="self_attest", description="self_attest or platform")
+    scope: Optional[str] = Field(default=None, description="Scope (optional)")
+
+
 # Helper functions
 def verify_api_key(authorization: Optional[str] = None) -> bool:
     """Verify API key if authentication is enabled"""
@@ -138,10 +169,27 @@ def get_or_create_session(session_id: Optional[str] = None) -> str:
     new_session_id = str(uuid.uuid4())
     sessions[new_session_id] = {
         "created_at": time.time(),
+        "last_request_time": None,
         "conversation_history": [],
-        "model": DEFAULT_MODEL
+        "model": DEFAULT_MODEL,
     }
     return new_session_id
+
+
+def _get_inactivity_config():
+    """AC-GV1: (inactivity_sec, save_context_when_idle) from ~/.janet/menubar_config.json or env."""
+    try:
+        config_path = Path.home() / ".janet" / "menubar_config.json"
+        if config_path.exists():
+            with open(config_path, "r") as f:
+                cfg = json.load(f)
+            min_val = max(1, min(60, int(cfg.get("inactivity_min", 10))))
+            return (min_val * 60, cfg.get("save_context_when_idle", True))
+    except Exception:
+        pass
+    sec = max(60, int(os.environ.get("JANET_INACTIVITY_FLUSH_SEC", "600")))
+    save = os.environ.get("JANET_SAVE_CONTEXT_WHEN_IDLE", "true").lower() in ("1", "true", "yes")
+    return (sec, save)
 
 
 def estimate_tokens(text: str) -> int:
@@ -222,7 +270,11 @@ async def root():
         "endpoints": {
             "chat": "/v1/chat/completions",
             "models": "/v1/models",
-            "health": "/health"
+            "health": "/health",
+            "learn": "/api/learn",
+            "cloud_allowed": "/api/cloud-allowed",
+            "cloud_allow": "/api/cloud-allow",
+            "cloud_id_verify": "/api/cloud-id-verify"
         }
     }
 
@@ -240,6 +292,174 @@ async def health_check():
         "available_models": janet_brain.available_models,
         "active_sessions": len(sessions)
     }
+
+
+# Startup time for uptime
+_server_start_time = time.time()
+
+
+@app.get("/api/status")
+async def api_status():
+    """Status endpoint for Home Assistant integration (sensors)"""
+    if not janet_brain:
+        return {"state": "disconnected", "connected": False}
+    
+    mm = _get_memory_manager()
+    memory_usage = 0
+    green_vault_entries = 0
+    blue_vault_active = False
+    red_vault_entries = 0
+    if mm:
+        try:
+            if hasattr(mm, "green_vault") and mm.green_vault:
+                green_vault_entries = len(mm.green_vault) if isinstance(mm.green_vault, (list, dict)) else 0
+            if hasattr(mm, "memory_usage"):
+                memory_usage = getattr(mm, "memory_usage", 0) or 0
+        except Exception:
+            pass
+    
+    return {
+        "state": "idle",
+        "connected": True,
+        "uptime": int(time.time() - _server_start_time),
+        "model": janet_brain.model_name,
+        "voice_enabled": False,
+        "in_conversation": len(sessions) > 0,
+        "last_input": None,
+        "last_response": None,
+        "turn_count": len(sessions),
+        "memory_usage": memory_usage,
+        "green_vault_entries": green_vault_entries,
+        "blue_vault_active": blue_vault_active,
+        "red_vault_entries": red_vault_entries,
+    }
+
+
+def _get_memory_manager():
+    """Lazy-init MemoryManager for Green Vault (JanetXMzNN Double Soul)"""
+    global memory_manager
+    if memory_manager is not None:
+        return memory_manager
+    try:
+        from src.memory import MemoryManager
+        janet_home = Path(os.getenv("JANET_HOME", str(Path.home() / ".janet")))
+        memory_dir = Path(os.getenv("JANET_MEMORY_DIR", str(janet_home / "memory")))
+        memory_manager = MemoryManager(memory_dir)
+        return memory_manager
+    except Exception as e:
+        print(f"⚠️  MemoryManager not available: {e}")
+        return None
+
+
+@app.post("/api/learn", response_model=LearnResponse)
+async def api_learn(
+    request: LearnRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Feed information to Janet's Green Vault for learning.
+    JanetXMzNN Double Soul - media digestion, CVE upgrade, etc.
+    """
+    if not verify_api_key(authorization):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    
+    mm = _get_memory_manager()
+    if not mm or not hasattr(mm, "green_vault"):
+        raise HTTPException(
+            status_code=503,
+            detail="Green Vault not available (MemoryManager not initialized)"
+        )
+    
+    tags = [request.context]
+    if request.metadata:
+        if request.metadata.get("source"):
+            tags.append(f"source:{request.metadata['source']}")
+        if request.metadata.get("type"):
+            tags.append(request.metadata["type"])
+    
+    try:
+        entry_id = mm.green_vault.add_summary(
+            summary=request.content[:50000] if len(request.content) > 50000 else request.content,
+            tags=tags,
+            confidence=0.85,
+            expiry=None,
+        )
+        stored = entry_id != ""
+        return LearnResponse(
+            status="success" if stored else "partial",
+            memory_id=entry_id if stored else None,
+            stored=stored,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Cloud Allowed protocol (JanetXCloud-Double-Soul)
+@app.get("/api/cloud-allowed")
+async def api_cloud_allowed(
+    scope: str = "youtube",
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Check if Cloud Allowed for scope. Used by MzNN before cloud API calls.
+    Returns {allowed: bool, id_verified: bool}.
+    """
+    if not verify_api_key(authorization):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    try:
+        from core.cloud_permission_guard import get_cloud_guard
+        guard = get_cloud_guard()
+        return {
+            "allowed": guard.is_allowed(scope),
+            "id_verified": guard.id_verified,
+        }
+    except ImportError:
+        return {"allowed": False, "id_verified": False}
+
+
+@app.post("/api/cloud-allow")
+async def api_cloud_allow(
+    request: CloudAllowRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Grant or revoke Cloud Allowed for scope. Internal use."""
+    if not verify_api_key(authorization):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    try:
+        from core.cloud_permission_guard import get_cloud_guard
+        guard = get_cloud_guard()
+        if request.grant:
+            ok = guard.grant(request.scope, request.id_verified)
+            return {"status": "granted" if ok else "denied", "granted": ok}
+        else:
+            guard.revoke(request.scope)
+            return {"status": "revoked"}
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Cloud Permission Guard not available")
+
+
+@app.post("/api/cloud-id-verify")
+async def api_cloud_id_verify(
+    request: CloudIdVerifyRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Verify ID for Cloud Allowed (self_attest or platform)."""
+    if not verify_api_key(authorization):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    try:
+        from core.cloud_permission_guard import get_cloud_guard
+        guard = get_cloud_guard()
+        method = request.method or "self_attest"
+        if method not in ("self_attest", "platform"):
+            method = "self_attest"
+        guard.verify_id(method)
+        return {
+            "verified": True,
+            "method": method,
+            "verified_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Cloud Permission Guard not available")
 
 
 @app.get("/v1/models")
@@ -283,7 +503,24 @@ async def chat_completions(
         raise HTTPException(status_code=400, detail="No messages provided")
     
     user_message = request.messages[-1].content
-    
+    session_id = get_or_create_session(request.session_id)
+    conv_history = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+
+    # AC-GV1: Inactivity flush — store previous segment if idle and save_context_when_idle
+    mm = _get_memory_manager()
+    if mm and session_id in sessions:
+        sess = sessions[session_id]
+        last_t = sess.get("last_request_time")
+        inactivity_sec, save_idle = _get_inactivity_config()
+        prev_history = [{"role": m.role, "content": m.content} for m in request.messages[:-1]]
+        if save_idle and prev_history and last_t is not None and (time.time() - last_t) >= inactivity_sec:
+            try:
+                mm.store_conversation(prev_history, context={"chat_id": session_id})
+            except Exception:
+                pass
+        sess["last_request_time"] = time.time()
+        sess["conversation_history"] = conv_history
+
     # Build context from conversation history
     context = {
         "conversation_history": [
@@ -554,9 +791,25 @@ async def websocket_endpoint(websocket: WebSocket):
 def initialize_janet_brain():
     """Initialize the global JanetBrain instance"""
     global janet_brain
-    
+
+    # HA Double Soul: DelegationManager when HOME_ASSISTANT_URL + TOKEN set
+    delegation_manager = None
+    ha_url = os.getenv("HOME_ASSISTANT_URL", "")
+    ha_token = os.getenv("HOME_ASSISTANT_TOKEN", "")
+    if ha_url and ha_token:
+        try:
+            from src.delegation.delegation_manager import DelegationManager
+            delegation_manager = DelegationManager(
+                home_assistant_url=ha_url,
+                home_assistant_token=ha_token,
+                require_confirmation=False  # Voice: no interactive confirm
+            )
+            print(f"🏠 HA Double Soul: enabled ({ha_url})")
+        except Exception as e:
+            print(f"⚠️  HA delegation init failed: {e}")
+
     print("🌱 Initializing Janet Brain...")
-    janet_brain = JanetBrain(model_name=DEFAULT_MODEL)
+    janet_brain = JanetBrain(model_name=DEFAULT_MODEL, delegation_manager=delegation_manager)
     
     if not janet_brain.is_available():
         print("⚠️  Janet Brain initialization failed!")
