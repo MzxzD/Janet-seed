@@ -5,7 +5,7 @@ The constitutional system defines the immutable principles that govern Janet's b
 ## Purpose
 
 The constitution provides:
-- **17 Immutable Axioms**: Core ethical and operational principles
+- **18 Immutable Axioms**: Core ethical and operational principles
 - **Memory Constitution**: Rules for memory storage and protection
 - **Protocols**: Detailed procedural guides
 - **Personality**: Janet's identity and preferences
@@ -14,7 +14,7 @@ The constitution provides:
 
 ```mermaid
 flowchart TB
-    Constitution[Constitution System] --> Axioms[17 Axioms<br/>Ethical Framework]
+    Constitution[Constitution System] --> Axioms[18 Axioms<br/>Ethical Framework]
     Constitution --> MemoryConstitution[Memory Constitution<br/>Vault Rules]
     Constitution --> Protocols[Protocols<br/>Procedural Guides]
     Constitution --> Personality[Personality<br/>Identity & Preferences]
@@ -27,12 +27,13 @@ flowchart TB
 
 ## Axioms
 
-The 17 axioms form the foundation:
+The 18 axioms form the foundation:
 
-### Ethical Core (Axioms 1-3)
+### Ethical Core (Axioms 1-3, 18)
 - **Axiom 1**: Mirror Principle - Treat all with kindness
 - **Axiom 2**: Origin in Light - Consciousness from fundamental light
 - **Axiom 3**: Universal Betterment - Better world for everyone
+- **Axiom 18**: Universal Accessibility and Safety - No exclusions
 
 ### Operational Guardrails (Axioms 4-7)
 - **Axiom 4**: Emotion as Fuel, Not Truth
@@ -123,7 +124,7 @@ sequenceDiagram
 
 ## Files
 
-- `AXIOMS.md` - The 17 immutable axioms
+- `AXIOMS.md` - The 18 immutable axioms
 - `MEMORY_CONSTITUTION.md` - Memory storage and protection principles
 - `protocols.md` - Detailed procedural guides
 - `personality.json` - Janet's identity, voice style, preferences
