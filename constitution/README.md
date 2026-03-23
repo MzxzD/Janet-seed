@@ -27,7 +27,7 @@ flowchart TB
 
 ## Axioms
 
-The 18 axioms form the foundation:
+The 20 axioms form the foundation:
 
 ### Ethical Core (Axioms 1-3, 18)
 - **Axiom 1**: Mirror Principle - Treat all with kindness

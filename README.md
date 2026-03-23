@@ -252,7 +252,7 @@ Janet now includes an OpenAI-compatible API server that works with Continue.dev 
 **Features:**
 - ✅ Offline-first - All processing local, no cloud
 - ✅ Privacy-first - Your code never leaves your machine
-- ✅ Constitutional AI - Follows 16 axioms
+- ✅ Constitutional AI - Follows 20 axioms
 - ✅ Multi-model support - Fast/balanced/powerful models
 
 **See [JANET_IDE_SETUP.md](JANET_IDE_SETUP.md) for complete setup instructions.**
@@ -292,6 +292,11 @@ graph LR
     
     All[All Components] --> Constitution[Constitution<br/>16 Axioms]
 ```
+
+## Publish / release
+
+- **Install:** [INSTALL.md](INSTALL.md) — dependencies, run, Homebrew, local WiFi.
+- **Changelog:** [CHANGELOG.md](CHANGELOG.md) — version history.
 
 ## 📜 License
 
