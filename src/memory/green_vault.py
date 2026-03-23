@@ -166,13 +166,16 @@ class GreenVault:
             print(f"⚠️  Error storing summary in Green Vault: {e}")
             return ""
     
-    def query_context(self, query: str, n_results: int = 5) -> List[Dict]:
+    def query_context(
+        self, query: str, n_results: int = 5, chat_id: Optional[str] = None
+    ) -> List[Dict]:
         """
         Query context from Green Vault using semantic search.
         
         Args:
             query: Search query
             n_results: Number of results to return
+            chat_id: Optional chat/session ID to filter by (AC-GV1)
         
         Returns:
             List of matching summaries with metadata
@@ -186,8 +189,9 @@ class GreenVault:
             return []
         
         try:
-            # Query ChromaDB for semantic matches
-            results = self.chromadb.search_memories(query, n_results)
+            # Query ChromaDB for semantic matches (optionally scoped to chat_id)
+            where = {"chat_id": chat_id} if chat_id else None
+            results = self.chromadb.search_memories(query, n_results, where=where)
             
             # Format results
             formatted_results = []

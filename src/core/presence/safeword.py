@@ -4,12 +4,58 @@ SafeWord Controller - Controls access to secrets via safe word unlock/lock.
 The safe word controls access to secrets stored in Red Vault and Blue Vault.
 When unlocked, secrets are loaded into Blue Vault for session use.
 When locked, Blue Vault is immediately zeroized.
+
+On macOS with JanetXApple installed: "safeword unlock" can use Keychain
+(Touch ID / Face ID) instead of typing the safe word — same sudo-like prompt
+as Passwords app.
 """
 
+import sys
 import threading
 from typing import Dict, Optional
+
+# Keychain service/account for SafeWord (macOS Touch ID unlock)
+SAFEWORD_KEYCHAIN_SERVICE = "janet.safeword.unlock"
 from enum import Enum
 from datetime import datetime, timedelta
+
+
+def get_safe_word_from_keychain() -> Optional[str]:
+    """
+    Get safe word from platform Keychain. On macOS, triggers Touch ID / Face ID
+    (same prompt as Passwords app). Returns None if Keychain unavailable or not set.
+    Requires JanetXApple-Passwords-Fusion: pip install janetxapple-passwords-fusion
+    """
+    if sys.platform != "darwin":
+        return None
+    try:
+        from janetxapple.keychain_macos import credential_get
+        r = credential_get(SAFEWORD_KEYCHAIN_SERVICE)
+        if "error" in r:
+            return None
+        pw = r.get("password")
+        return pw.strip() if pw and isinstance(pw, str) else None
+    except ImportError:
+        return None
+    except Exception:
+        return None
+
+
+def store_safe_word_in_keychain(safe_word: str) -> bool:
+    """
+    Store safe word in Keychain for future Touch ID unlock. One-time setup.
+    User will see OS prompt to add to Keychain (Touch ID to confirm).
+    """
+    if sys.platform != "darwin" or not safe_word or not safe_word.strip():
+        return False
+    try:
+        from janetxapple.keychain_macos import credential_store
+        r = credential_store(SAFEWORD_KEYCHAIN_SERVICE, safe_word.strip(), account=SAFEWORD_KEYCHAIN_SERVICE)
+        return "error" not in r
+    except ImportError:
+        return False
+    except Exception:
+        return False
 
 
 class LockState(Enum):

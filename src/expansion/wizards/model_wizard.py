@@ -5,7 +5,7 @@ Guides users through installing Ollama models offline or online.
 """
 
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 from .wizard_base import ExpansionWizard
 from ..model_manager import ModelManager
 

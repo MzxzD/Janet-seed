@@ -172,19 +172,22 @@ class Installer:
                 pass
             print("  ⚠️  Ollama found but may not be working correctly")
         
-        # Ollama not found - ask for consent to install
+        # Ollama not found - ask for consent to install (or use JANET_AUTO_INSTALL_OLLAMA=1)
         print("  ⚠️  Ollama not found.")
         print("  ℹ️  Ollama is required for Janet's LLM brain to function.")
         print("      Without it, Janet will not be able to generate responses.")
         
-        response = input("  Install Ollama now? (yes/NO): ").strip().lower()
-        if response not in ["yes", "y"]:
-            print("  ⏭️  Ollama installation skipped.")
-            print("  📋 You can install Ollama manually from https://ollama.com")
-            print("      Or use the expansion protocol after startup to set it up.")
-            return
+        if os.environ.get("JANET_AUTO_INSTALL_OLLAMA") != "1":
+            response = input("  Install Ollama now? (yes/NO): ").strip().lower()
+            if response not in ["yes", "y"]:
+                print("  ⏭️  Ollama installation skipped.")
+                print("  📋 You can install Ollama manually from https://ollama.com")
+                print("      Or use the expansion protocol after startup to set it up.")
+                return
+        else:
+            print("  📥 JANET_AUTO_INSTALL_OLLAMA=1: installing without prompt.")
         
-        # User consented - proceed with installation
+        # User consented (or auto-install) - proceed with installation
         print("  📥 Installing Ollama...")
         
         if sys.platform == "win32":

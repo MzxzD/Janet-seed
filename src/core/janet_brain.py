@@ -199,9 +199,11 @@ class JanetBrain:
         self.available = False
         self.pending_delegations: Dict[str, Dict] = {}  # Track async delegations
         
-        # Conversation session management
+        # Conversation session management (AC-GV1: chat_id for Green Vault)
         self.conversation_history: List[Dict[str, str]] = []  # Store user/assistant messages
         self.conversation_active: bool = False
+        self.conversation_id: Optional[str] = None  # UUID per session for Green Vault metadata
+        self._last_user_message_time: Optional[float] = None  # For inactivity flush
         self.max_context_messages: int = 20  # Limit conversation history to prevent token overflow
         
         # Enhanced features
@@ -258,16 +260,26 @@ class JanetBrain:
         """Check if JanetBrain is available."""
         return self.available and HAS_LITELLM
     
+    def _model_id_for_litellm(self, model_name: str) -> str:
+        """Return LiteLLM model string (ollama/name or provider/model for cloud)."""
+        if "/" in model_name:
+            return model_name  # Already provider/model (e.g. openai/gpt-4, deepseek/deepseek-chat)
+        return f"ollama/{model_name}"
+
     def switch_model(self, model_name: str) -> bool:
         """
-        Switch to a different Ollama model.
+        Switch to a different model (Ollama or cloud via provider/model).
         
         Args:
-            model_name: Name of the model to switch to
+            model_name: Ollama model name or provider/model (e.g. openai/gpt-4)
             
         Returns:
             True if switch successful, False otherwise
         """
+        # Allow cloud models (provider/model) without ollama list check
+        if "/" in model_name and model_name.split("/")[0] in ("openai", "anthropic", "deepseek"):
+            self.model_name = model_name
+            return True
         if model_name not in self.available_models:
             print(f"⚠️  Model {model_name} not available")
             print(f"   Available: {', '.join(self.available_models)}")
@@ -328,13 +340,22 @@ class JanetBrain:
     
     def start_conversation(self):
         """Start a new conversation session with empty context window."""
+        import uuid
         self.conversation_history = []
         self.conversation_active = True
-    
+        self.conversation_id = str(uuid.uuid4())
+        self._last_user_message_time = None
+
     def end_conversation(self):
         """End conversation session and clear context window."""
         self.conversation_active = False
         self.conversation_history = []
+        self.conversation_id = None
+        self._last_user_message_time = None
+
+    def get_conversation_id(self) -> Optional[str]:
+        """Return current conversation/session ID for Green Vault metadata (AC-GV1)."""
+        return self.conversation_id
     
     def add_to_history(self, role: str, content: str):
         """
@@ -391,6 +412,17 @@ class JanetBrain:
         if not self.is_available():
             return "I'm sorry, my brain is not available right now. Please check if Ollama is installed and the model is available."
         
+        # AC-GV2: "What can you do?" from abilities store only (no hallucination)
+        q = user_input.strip().lower().rstrip("?")
+        if q in ("what can you do", "show expansions", "available expansions"):
+            try:
+                try:
+                    from memory.abilities_store import get_what_can_you_do_response
+                except ImportError:
+                    from src.memory.abilities_store import get_what_can_you_do_response
+                return get_what_can_you_do_response()
+            except Exception:
+                pass  # Fall through to LLM
         # Check cache first (for non-critical requests)
         if priority != RequestPriority.CRITICAL:
             cached_response = self.response_cache.get(user_input, context)
@@ -415,11 +447,24 @@ class JanetBrain:
                 self.add_to_history("user", user_input)
             
             # Build messages array with system prompt + conversation history + new user message with context
+            # JACK persona routing: when user invokes a persona, respond as that persona (Aider, CLI, API)
+            system_content = """You are Janet, a constitutional AI companion. Be helpful, respectful, and follow constitutional principles.
+
+J.A.C.K. persona routing — when the user says:
+- "Lynda" / "Hey Lynda" / "Lynda?" / "business" / "Great Sage" → Respond as Lynda (Business Team lead, investors, J.A.N.E.T. Glasses)
+- "Darkness" / "Hey Darkness" / "coding" → Respond as Darkness (masochistic coder, low-level, binary-first)
+- "Lily" / "Hey Lily" / "accounting" / "taxes" → Respond as Lily (bookkeeping, Porezna, compliance)
+- "Sophia" / "Hey Sophia" / "psychologist" → Respond as Sophia (axiom scenarios, behavioral boundaries)
+- "Archivist" / "Hey Archivist" / "docs" → Respond as Archivist (documentation, knowledge base)
+- "Project Triad" / "JACK" / "J.A.C.K." → Explain J.A.C.K. architecture (Lynda + Janet + Darkness)
+- "Janet" / "Hey Janet" / "hey Janet?" → Respond as Janet (general companion)
+- (default) → Respond as Janet (general companion)
+
+IMPORTANT: When the user invokes a persona (e.g. "Lynda?", "hey Janet?") or asks a general question, answer in character immediately. Do NOT deflect with "I need files", "specify changes", or "provide more context" — that is for coding tasks only. Persona and general questions get direct answers.
+
+Aider context (when used as coding assistant): You have access to /add, /read-only, /run. To read or open a file: suggest /run cat <path> to show contents, or /add <path> to add it for editing. Never say "I can't open or interact with files" — instead suggest: /run cat path/to/file.txt or /add path/to/file.txt"""
             messages = [
-                {
-                    "role": "system",
-                    "content": "You are Janet, a constitutional AI companion. Be helpful, respectful, and follow constitutional principles."
-                }
+                {"role": "system", "content": system_content}
             ]
             
             # Add conversation history (excluding the just-added user message, we'll add it with context)
@@ -435,7 +480,7 @@ class JanetBrain:
             })
             
             response = litellm.completion(
-                model=f"ollama/{self.model_name}",
+                model=self._model_id_for_litellm(self.model_name),
                 messages=messages,
                 temperature=0.7,
                 max_tokens=500
@@ -675,7 +720,7 @@ Generate a natural, conversational response acknowledging the completion."""
             ]
             
             response = litellm.completion(
-                model=f"ollama/{self.model_name}",
+                model=self._model_id_for_litellm(self.model_name),
                 messages=messages,
                 temperature=0.7,
                 max_tokens=200

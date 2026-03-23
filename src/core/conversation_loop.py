@@ -3,8 +3,12 @@ Conversation Loop for J.A.N.E.T. Seed
 Handles the structured conversation flow with Red Thread, intent interpretation, and delegation.
 """
 
+import os
 import random
-from typing import TYPE_CHECKING, Union
+import time
+import json
+from pathlib import Path
+from typing import TYPE_CHECKING, Union, Tuple
 
 # Import VOICE_AVAILABLE if needed
 try:
@@ -15,6 +19,26 @@ except ImportError:
 
 from .context_builder import build_context
 from .janet_core import RED_THREAD_EVENT
+
+# AC-GV1: inactivity flush config from ~/.janet/menubar_config.json or env
+_MENUBAR_CONFIG_PATH = Path.home() / ".janet" / "menubar_config.json"
+
+
+def _get_inactivity_config() -> Tuple[int, bool]:
+    """Return (inactivity_sec, save_context_when_idle)."""
+    try:
+        if _MENUBAR_CONFIG_PATH.exists():
+            with open(_MENUBAR_CONFIG_PATH, "r") as f:
+                cfg = json.load(f)
+            min_val = int(cfg.get("inactivity_min", 10))
+            min_val = max(1, min(60, min_val))
+            return (min_val * 60, cfg.get("save_context_when_idle", True))
+    except Exception:
+        pass
+    sec = int(os.environ.get("JANET_INACTIVITY_FLUSH_SEC", "600"))  # default 10 min
+    save = os.environ.get("JANET_SAVE_CONTEXT_WHEN_IDLE", "true").lower() in ("1", "true", "yes")
+    return (max(60, sec), save)
+
 
 if TYPE_CHECKING:
     from .janet_core import JanetCore
@@ -109,7 +133,16 @@ def run_conversation_loop(janet: 'JanetCore', input_device: str, voice_mode: boo
         # SafeWord commands (Memory Constitution)
         if user_input.lower().startswith("safeword unlock") or user_input.lower().startswith("unlock safeword"):
             if janet.safe_word_controller and janet.memory_manager:
-                safe_word = input("Enter safe word: ").strip()
+                safe_word = None
+                try:
+                    from core.presence.safeword import get_safe_word_from_keychain
+                    safe_word = get_safe_word_from_keychain()
+                    if safe_word:
+                        print("\n🔐 Touch ID / Keychain — authenticated.")
+                except Exception:
+                    pass
+                if not safe_word:
+                    safe_word = input("Enter safe word (or run 'safeword setup' to use Touch ID): ").strip()
                 if safe_word:
                     if janet.safe_word_controller.unlock(safe_word, janet.memory_manager.blue_vault):
                         print("\n🔓 Safe word unlocked. Blue Vault is now accessible.")
@@ -127,6 +160,21 @@ def run_conversation_loop(janet: 'JanetCore', input_device: str, voice_mode: boo
                     print("\n⚠️  No safe word provided.")
             else:
                 print("\n⚠️  SafeWord controller not available.")
+            continue
+
+        if user_input.lower().startswith("safeword setup") or user_input.lower().startswith("safeword keychain"):
+            try:
+                import getpass
+                from core.presence.safeword import store_safe_word_in_keychain
+                safe_word = getpass.getpass("Enter safe word to store in Keychain (Touch ID will protect it): ").strip()
+                if safe_word and store_safe_word_in_keychain(safe_word):
+                    print("\n✓ Safe word stored in Keychain. Future 'safeword unlock' will use Touch ID.")
+                elif not safe_word:
+                    print("\n⚠️  No safe word provided.")
+                else:
+                    print("\n❌ Failed. Install: pip install janetxapple-passwords-fusion")
+            except Exception as e:
+                print(f"\n❌ Setup failed: {e}")
             continue
         
         if user_input.lower() == "safeword lock" or user_input.lower() == "lock safeword":
@@ -150,7 +198,46 @@ def run_conversation_loop(janet: 'JanetCore', input_device: str, voice_mode: boo
             else:
                 print("\n⚠️  SafeWord controller not available.")
             continue
-        
+
+        # Cloud Allowed protocol (JanetXCloud-Double-Soul)
+        cloud_phrases = [
+            "allow cloud for youtube", "allow cloud for YouTube", "cloud sudo for youtube",
+            "cloud sudo youtube", "cloud allowed youtube", "enable cloud youtube",
+        ]
+        if user_input.lower().strip() in [p.lower() for p in cloud_phrases]:
+            try:
+                import sys
+                from pathlib import Path
+                _janet_os = Path(__file__).resolve().parent.parent.parent.parent
+                if str(_janet_os) not in sys.path:
+                    sys.path.insert(0, str(_janet_os))
+                from core.cloud_permission_guard import get_cloud_guard
+                guard = get_cloud_guard()
+                if not guard.id_verified:
+                    print("\nJanet: Cloud Allowed includes 18+ content. Verify your age to enable.")
+                    print("   Say 'I am 18 or older' to continue (self-attestation), or type 'cloud verify'.")
+                else:
+                    guard.grant("youtube", True)
+                    print("\nJanet: Cloud Allowed granted for YouTube. Cloud fallback is now enabled.")
+            except ImportError:
+                print("\nJanet: Cloud Permission Guard not available.")
+            continue
+
+        if user_input.lower().strip() in ["i am 18 or older", "i am 18", "cloud verify"]:
+            try:
+                import sys
+                from pathlib import Path
+                _janet_os = Path(__file__).resolve().parent.parent.parent.parent
+                if str(_janet_os) not in sys.path:
+                    sys.path.insert(0, str(_janet_os))
+                from core.cloud_permission_guard import get_cloud_guard
+                guard = get_cloud_guard()
+                guard.verify_id("self_attest")
+                print("\nJanet: Age verified. You can now say 'allow cloud for YouTube' to enable.")
+            except ImportError:
+                print("\nJanet: Cloud Permission Guard not available.")
+            continue
+
         # Vault inspection commands
         if user_input.lower() == "vault status" or user_input.lower() == "vaults":
             if janet.memory_manager:
@@ -170,22 +257,18 @@ def run_conversation_loop(janet: 'JanetCore', input_device: str, voice_mode: boo
                 print("\n⚠️  Memory vaults not available.")
             continue
         
-        # Expansion commands (Day 5)
-        if user_input.lower() in ["what can you do", "show expansions", "available expansions"]:
-                if janet.expansion_detector:
-                    opportunities = janet.check_expansion_opportunities()
-                    if opportunities:
-                        print(f"\n🌱 Available Expansions ({len(opportunities)}):")
-                        for i, opp in enumerate(opportunities, 1):
-                            print(f"\n  {i}. {opp.name}")
-                            print(f"     {opp.description}")
-                            print(f"     Setup time: {opp.estimated_setup_time}")
-                        print("\nWould you like to explore any of these? (say the number or name)")
-                    else:
-                        print("\nNo new expansion opportunities available at this time.")
-                else:
-                    print("\nExpansion system not available.")
-                continue
+        # AC-GV2: "What can you do?" from abilities store only (no hallucination)
+        if user_input.lower().strip().rstrip("?") in ["what can you do", "show expansions", "available expansions"]:
+            try:
+                try:
+                    from memory.abilities_store import get_what_can_you_do_response
+                except ImportError:
+                    from src.memory.abilities_store import get_what_can_you_do_response
+                response_text = get_what_can_you_do_response()
+                print(f"\nJanet: {response_text}")
+            except Exception as e:
+                print(f"\nJanet: I couldn't load my abilities list right now ({e}). Try again or check Janet-Superpowers/data/abilities.json.")
+            continue
         
         if user_input.lower().startswith("expand ") or user_input.lower().startswith("enable "):
                 # User wants to enable an expansion
@@ -418,6 +501,22 @@ def run_conversation_loop(janet: 'JanetCore', input_device: str, voice_mode: boo
         # ========== CONVERSATION PROCESSING (matching pseudo-code) ==========
         
         try:
+            # AC-GV1: Ensure conversation session and inactivity flush (save regardless of close)
+            if janet.janet_brain and not janet.janet_brain.conversation_active:
+                janet.janet_brain.start_conversation()
+            if janet.janet_brain and janet.memory_manager:
+                history = janet.janet_brain.get_conversation_history()
+                inactivity_sec, save_idle = _get_inactivity_config()
+                last_t = getattr(janet.janet_brain, "_last_user_message_time", None)
+                if save_idle and history and last_t is not None and (time.time() - last_t) >= inactivity_sec:
+                    try:
+                        cid = janet.janet_brain.get_conversation_id()
+                        janet.memory_manager.store_conversation(history, context={"chat_id": cid} if cid else None)
+                    except Exception:
+                        pass
+            if janet.janet_brain:
+                janet.janet_brain._last_user_message_time = time.time()
+
             # Build context (tone, memory, delegation capabilities)
             context = build_context(janet, user_input, input_device)
             
@@ -499,7 +598,11 @@ def run_conversation_loop(janet: 'JanetCore', input_device: str, voice_mode: boo
                         
                         if first_user_msg and janet.memory_write_allowed(first_user_msg, context):
                             try:
-                                janet.memory_manager.store_conversation(conversation_history)
+                                cid = janet.janet_brain.get_conversation_id() if janet.janet_brain else None
+                                janet.memory_manager.store_conversation(
+                                    conversation_history,
+                                    context={"chat_id": cid} if cid else None,
+                                )
                             except Exception as e:
                                 print(f"⚠️  Conversation storage failed: {e}")
                 

@@ -1,7 +1,9 @@
 """
 LiteLLM Router for Model Delegation
 Routes tasks to specialized models: conversation, programming, deep_thinking
+Supports JANET_70B_MODEL for local 70B (e.g. deepseek-r1:70b, llama3.1:70b)
 """
+import os
 from typing import Dict, Optional, List
 from enum import Enum
 
@@ -10,6 +12,9 @@ try:
     HAS_LITELLM = True
 except ImportError:
     HAS_LITELLM = False
+
+# Optional 70B model for complex tasks (Comet-style local cluster)
+JANET_70B_MODEL = os.getenv("JANET_70B_MODEL", "")
 
 
 class TaskType(Enum):
@@ -37,20 +42,26 @@ class LiteLLMRouter:
             print("⚠️  LiteLLM not available. Install with: pip install litellm")
     
     def _default_config(self) -> Dict:
-        """Default model configuration."""
+        """Default model configuration. Uses JANET_70B_MODEL for deep_thinking/programming when set."""
+        deep_model = "ollama/llama3:70b"
+        prog_model = "ollama/deepseek-coder:6.7b"
+        if JANET_70B_MODEL:
+            prefix = "ollama/" if "/" not in JANET_70B_MODEL else ""
+            deep_model = f"{prefix}{JANET_70B_MODEL}"
+            prog_model = deep_model  # Use 70B for programming when configured
         return {
             "conversation": {
-                "model": "ollama/llama3",  # Default conversation model
+                "model": "ollama/llama3",
                 "temperature": 0.7,
                 "max_tokens": 1000
             },
             "programming": {
-                "model": "ollama/deepseek-coder:6.7b",  # Programming model
+                "model": prog_model,
                 "temperature": 0.3,
                 "max_tokens": 2000
             },
             "deep_thinking": {
-                "model": "ollama/llama3:70b",  # Deep thinking model (if available)
+                "model": deep_model,
                 "temperature": 0.5,
                 "max_tokens": 3000
             },

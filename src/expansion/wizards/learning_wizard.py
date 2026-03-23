@@ -3,7 +3,7 @@ Learning Wizard — Guided Setup for Green Vault Learning
 Guides users through selecting summaries, providing consent, choosing model, and initiating learning.
 """
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional, Tuple
 from .wizard_base import ExpansionWizard
 from memory.learning_manager import LearningManager
 from memory.llm_learner import LLMLearner

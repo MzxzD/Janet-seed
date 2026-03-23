@@ -6,9 +6,16 @@ Provides direct access to Janet-seed WebSocket API, privilege guard, and memory 
 
 import asyncio
 import json
+import os
 import sys
 import websockets
 from typing import Any, Dict, Optional
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from pixel_inbox import pop_inbox, read_inbox
+except ImportError:
+    pop_inbox = read_inbox = None
 
 # MCP Protocol implementation
 class MCPServer:
@@ -127,13 +134,49 @@ class MCPServer:
                     "type": "object",
                     "properties": {}
                 }
+            },
+            {
+                "name": "janet_pixel_pop_inbox",
+                "description": "Pop the next message from Pixel (Janet IDE on Pixel Fold) that was sent via Send to Cursor. Use this to receive and process messages from the Pixel app as if the user had typed them in Cursor. Returns the message text and metadata, or null if inbox is empty.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            },
+            {
+                "name": "janet_pixel_list_inbox",
+                "description": "List all pending messages in the Pixel-to-Cursor inbox (without removing them). Use to check if Pixel has sent messages before popping.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            },
+            {
+                "name": "janet_foundation_model_invoke",
+                "description": "Invoke Janet's on-device/ Ollama model with a prompt. Use Model equivalent for Shortcuts - send prompt, get generated text. Useful for summarization, extraction, or any LLM task from Cursor.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "The prompt to send to the model"
+                        }
+                    },
+                    "required": ["prompt"]
+                }
             }
         ]
     
     async def call_tool(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Execute an MCP tool"""
         try:
-            if name == "janet_send_message":
+            if name == "janet_foundation_model_invoke":
+                prompt = arguments.get("prompt", "")
+                response = await self.send_message("user_message", prompt)
+                text = response.get("text") or response.get("reply") or ""
+                return {"content": [{"type": "text", "text": text}]}
+
+            elif name == "janet_send_message":
                 text = arguments.get("text", "")
                 msg_type = arguments.get("message_type", "user_message")
                 response = await self.send_message(msg_type, text)
@@ -166,7 +209,22 @@ class MCPServer:
             elif name == "janet_end_conversation":
                 response = await self.send_message("thank_you_janet", "Thank you, Janet!")
                 return {"content": [{"type": "text", "text": "Conversation ended and summary stored."}]}
-            
+
+            elif name == "janet_pixel_pop_inbox":
+                if pop_inbox is None:
+                    return {"content": [{"type": "text", "text": json.dumps({"error": "pixel_inbox module not available"})}]}
+                entry = pop_inbox()
+                if entry is None:
+                    return {"content": [{"type": "text", "text": json.dumps({"pending": False, "message": None})}]}
+                return {"content": [{"type": "text", "text": json.dumps({"pending": True, "text": entry.get("text", ""), "id": entry.get("id"), "timestamp": entry.get("timestamp"), "source": "pixel"})}]}
+
+            elif name == "janet_pixel_list_inbox":
+                if read_inbox is None:
+                    return {"content": [{"type": "text", "text": json.dumps({"error": "pixel_inbox module not available"})}]}
+                entries = read_inbox()
+                summary = [{"id": e.get("id"), "text": (e.get("text", "")[:80] + "...") if len(e.get("text", "")) > 80 else e.get("text", ""), "timestamp": e.get("timestamp")} for e in entries]
+                return {"content": [{"type": "text", "text": json.dumps({"count": len(entries), "entries": summary})}]}
+
             else:
                 return {"error": f"Unknown tool: {name}"}
         

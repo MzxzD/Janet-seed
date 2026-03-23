@@ -2,12 +2,26 @@
 """
 Simple WebSocket server for Call Janet iPhone app
 Handles basic conversation with Ollama LLM
+Supports pixel_forward_to_cursor for Pixel-to-Cursor closed loop.
+Supports shell_command for Janet Terminal (remote shell execution).
+Optional mDNS advertising (_janet._tcp) for auto-discovery.
 """
+import argparse
 import asyncio
 import json
+import uuid
 import websockets
 import subprocess
 from datetime import datetime
+
+from pixel_inbox import append_inbox as _append_pixel_inbox
+
+# mDNS advertiser (optional)
+try:
+    from mdns_advertiser import JanetMdnsAdvertiser
+    MDNS_AVAILABLE = True
+except ImportError:
+    MDNS_AVAILABLE = False
 from src.handlers.shortcut_handler import ShortcutHandler
 
 # Import Red Thread event for constitutional integration (Axiom 8)
@@ -24,6 +38,30 @@ conversations = {}
 
 # Initialize shortcut handler
 shortcut_handler = None
+
+# Server config (set from main)
+ALLOW_SHELL = False
+
+
+async def run_shell_command(cmd: str):
+    """Execute shell command on host. Returns (stdout, stderr, exit_code)."""
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        return (
+            stdout.decode("utf-8", errors="replace"),
+            stderr.decode("utf-8", errors="replace"),
+            proc.returncode or 0,
+        )
+    except asyncio.TimeoutError:
+        return ("", "Command timed out after 30s", -1)
+    except Exception as e:
+        return ("", str(e), -1)
+
 
 async def query_ollama(prompt: str) -> str:
     """Query Ollama LLM"""
@@ -129,6 +167,24 @@ async def handle_client(websocket):
                 elif msg_type == 'heartbeat':
                     # Heartbeat
                     await websocket.send(json.dumps({'type': 'heartbeat_ack'}))
+
+                elif msg_type == 'pixel_forward_to_cursor':
+                    # Pixel-to-Cursor relay (Courier / closed loop)
+                    user_text = data.get('text', '')
+                    entry = {
+                        'id': str(uuid.uuid4()),
+                        'text': user_text,
+                        'timestamp': datetime.now().isoformat(),
+                        'source': 'pixel',
+                    }
+                    _append_pixel_inbox(entry)
+                    print(f"📤 Pixel -> Cursor: {user_text[:60]}...")
+                    response = {
+                        'type': 'pixel_forward_ack',
+                        'id': entry['id'],
+                        'message': 'Queued for Cursor',
+                    }
+                    await websocket.send(json.dumps(response))
                 
                 elif msg_type in ['recognize_intent', 'create_shortcut', 'build_shortcut',
                                    'get_shortcuts', 'save_shortcut', 'delete_shortcut']:
@@ -136,7 +192,35 @@ async def handle_client(websocket):
                     print(f"🔗 Handling shortcut message: {msg_type}")
                     response = await shortcut_handler.handle_message(data)
                     await websocket.send(json.dumps(response))
-                
+
+                elif msg_type == 'shell_command':
+                    # Janet Terminal: remote shell execution
+                    if not ALLOW_SHELL:
+                        await websocket.send(json.dumps({
+                            "type": "shell_output",
+                            "stdout": "",
+                            "stderr": "Shell execution disabled. Start with --allow-shell to enable.",
+                            "exit_code": -1,
+                        }))
+                    else:
+                        cmd = data.get('command', '').strip()
+                        if not cmd:
+                            await websocket.send(json.dumps({
+                                "type": "shell_output",
+                                "stdout": "",
+                                "stderr": "No command provided",
+                                "exit_code": -1,
+                            }))
+                        else:
+                            print(f"🖥️  Shell: {cmd[:60]}...")
+                            stdout, stderr, exit_code = await run_shell_command(cmd)
+                            await websocket.send(json.dumps({
+                                "type": "shell_output",
+                                "stdout": stdout,
+                                "stderr": stderr,
+                                "exit_code": exit_code,
+                            }))
+
                 else:
                     print(f"⚠️  Unknown message type: {msg_type}")
             
@@ -151,9 +235,17 @@ async def handle_client(websocket):
         if client_id in conversations:
             del conversations[client_id]
 
-async def main():
-    global shortcut_handler
-    
+async def main(args):
+    global shortcut_handler, ALLOW_SHELL
+    ALLOW_SHELL = args.allow_shell
+
+    mdns_advertiser = None
+    if args.mdns and MDNS_AVAILABLE:
+        mdns_advertiser = JanetMdnsAdvertiser(port=args.port)
+        mdns_advertiser.advertise()
+    elif args.mdns and not MDNS_AVAILABLE:
+        print("⚠️  --mdns requested but zeroconf not installed. pip install zeroconf")
+
     print("╔══════════════════════════════════════════════════════════════════════╗")
     print("║                                                                      ║")
     print("║              🧠 CALL JANET - WEBSOCKET SERVER 🧠                      ║")
@@ -161,8 +253,12 @@ async def main():
     print("╚══════════════════════════════════════════════════════════════════════╝")
     print("")
     print("✅ Starting WebSocket server...")
-    print("📡 Listening on: ws://0.0.0.0:8765")
-    print("📱 iPhone can connect via: ws://192.168.0.121:8765")
+    print(f"📡 Listening on: ws://0.0.0.0:{args.port}")
+    print("📱 iPhone / Pixel can connect via: ws://<your-ip>:8765")
+    if args.mdns:
+        print("📢 mDNS: Auto-discovery enabled (_janet._tcp)")
+    if args.allow_shell:
+        print("🖥️  Shell: Remote shell execution ENABLED")
     print("")
     print("🧠 Using Ollama (qwen2) for responses")
     print("💚 Green Vault: In-memory (for testing)")
@@ -173,11 +269,24 @@ async def main():
     shortcut_handler = ShortcutHandler(memory_manager=None, llm=query_ollama)
     print("✅ Shortcut handler initialized")
     print("")
-    print("✅ Server ready! Waiting for iPhone connection...")
+    print("✅ Server ready! Waiting for connections...")
     print("")
-    
-    async with websockets.serve(handle_client, "0.0.0.0", 8765):
-        await asyncio.Future()  # run forever
+
+    try:
+        async with websockets.serve(handle_client, "0.0.0.0", args.port):
+            await asyncio.Future()  # run forever
+    finally:
+        if mdns_advertiser:
+            mdns_advertiser.stop()
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Janet WebSocket server")
+    p.add_argument("--port", type=int, default=8765, help="WebSocket port")
+    p.add_argument("--mdns", action="store_true", help="Advertise via mDNS for auto-discovery")
+    p.add_argument("--allow-shell", action="store_true", help="Allow shell_command for Janet Terminal")
+    return p.parse_args()
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(parse_args()))

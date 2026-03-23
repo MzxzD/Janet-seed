@@ -1,0 +1,2 @@
+#!/bin/bash
+cd "/Users/mzxzd/Documents/Janet-Projects/JanetOS/janet-seed" && "/Users/mzxzd/Documents/Janet-Projects/JanetOS/janet-seed/.venv/bin/python3" janet_menubar.py "$@"

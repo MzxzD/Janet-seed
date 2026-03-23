@@ -102,13 +102,16 @@ class ChromaDBStore:
             print(f"⚠️  Failed to store memory in ChromaDB: {e}")
             return None
     
-    def search_memories(self, query: str, n_results: int = 5) -> List[Dict]:
+    def search_memories(
+        self, query: str, n_results: int = 5, where: Optional[Dict] = None
+    ) -> List[Dict]:
         """
         Search memories by semantic similarity.
         
         Args:
             query: Search query
             n_results: Number of results to return
+            where: Optional ChromaDB where filter (e.g. {"chat_id": "uuid"}) for AC-GV1
         
         Returns:
             List of matching memories with scores
@@ -117,10 +120,10 @@ class ChromaDBStore:
             return []
         
         try:
-            results = self.collection.query(
-                query_texts=[query],
-                n_results=n_results
-            )
+            kwargs = {"query_texts": [query], "n_results": n_results}
+            if where:
+                kwargs["where"] = where
+            results = self.collection.query(**kwargs)
             
             memories = []
             if results['ids'] and len(results['ids'][0]) > 0:

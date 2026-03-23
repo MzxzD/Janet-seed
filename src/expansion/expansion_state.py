@@ -9,7 +9,7 @@ import json
 import hashlib
 from pathlib import Path
 from typing import Dict, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
 
@@ -33,7 +33,7 @@ class ExpansionState:
         self.enabled_expansions[expansion_type] = config
         self.consent_records.append({
             "expansion_type": expansion_type,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "action": "enabled",
             **consent_data
         })
@@ -44,7 +44,7 @@ class ExpansionState:
             del self.enabled_expansions[expansion_type]
             self.consent_records.append({
                 "expansion_type": expansion_type,
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "action": "disabled",
                 **consent_data
             })
@@ -109,14 +109,14 @@ class ExpansionStateManager:
             with open(self.state_file, 'w') as f:
                 json.dump({
                     "enabled_expansions": state.enabled_expansions,
-                    "last_updated": datetime.utcnow().isoformat() + "Z"
+                    "last_updated": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 }, f, indent=2)
             
             # Save consent records
             with open(self.consent_file, 'w') as f:
                 json.dump({
                     "consent_records": state.consent_records,
-                    "last_updated": datetime.utcnow().isoformat() + "Z"
+                    "last_updated": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 }, f, indent=2)
         except IOError as e:
             print(f"⚠️  Error saving expansion state: {e}")
@@ -132,7 +132,7 @@ class ExpansionStateManager:
         state = self.load_expansion_state()
         state.consent_records.append({
             "expansion_type": expansion_type,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             **consent_data
         })
         self.save_expansion_state(state)

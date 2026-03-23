@@ -15,6 +15,10 @@ The test suite ensures:
 ```
 tests/
 ├── __init__.py
+├── test_abilities_store.py         # Abilities store / "What can you do?"
+├── test_e2e_api.py                 # E2E: API health, models, chat (needs server)
+├── test_e2e_ctl.py                 # E2E: Menu bar control surface (--ctl)
+├── test_edge_cases.py              # Edge: server down, bad port, install script
 ├── test_expansion_detector.py      # Expansion detection tests
 ├── test_expansion_state.py         # State management tests
 ├── test_expansion_dialog.py        # Suggestion dialogue tests
@@ -34,6 +38,12 @@ Test individual components in isolation:
 - **Expansion Dialog**: Suggestion flows, user interaction
 - **Wizard Base**: Base functionality, network checks, offline instructions
 - **Model Manager**: Model detection, verification, offline guidance
+
+### E2E and Edge-Case Tests
+
+- **test_e2e_api.py**: Health, `/v1/models`, chat (skipped when server not running).
+- **test_e2e_ctl.py**: Menu bar `--ctl` (config-get, config-set, status) — no server required.
+- **test_edge_cases.py**: API when server down, bad port, timeout, malformed JSON, wrong API key; install script idempotent and `JANET_SEED_DIR`. Run with the rest of the suite; no live server needed for edge tests.
 
 ### Integration Tests
 

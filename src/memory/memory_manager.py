@@ -195,7 +195,7 @@ class MemoryManager:
         
         Args:
             conversation_history: List of messages with 'role' and 'content' keys
-            context: Additional context (tone, emotional state, etc.)
+            context: Additional context (tone, emotional state, chat_id for AC-GV1, etc.)
         
         Returns:
             True if stored, False if blocked or discarded
@@ -250,12 +250,16 @@ class MemoryManager:
                 # Distill entire conversation
                 distilled = self.distiller.distill(combined_user, combined_assistant, context)
                 
-                # Store in Green Vault
+                # Store in Green Vault (include chat_id in metadata for AC-GV1)
+                meta = {}
+                if context and context.get("chat_id"):
+                    meta["chat_id"] = str(context["chat_id"])
                 entry_id = self.green_vault.add_summary(
                     summary=distilled.get("summary", ""),
                     tags=distilled.get("tags", []),
                     confidence=distilled.get("confidence", 0.5),
-                    expiry=None
+                    expiry=None,
+                    metadata=meta if meta else None,
                 )
                 return entry_id != ""
             except Exception as e:
@@ -295,13 +299,14 @@ class MemoryManager:
             return False
         return self.green_vault.undo_last_summary()
 
-    def search(self, query: str, n_results: int = 5) -> List[Dict]:
+    def search(self, query: str, n_results: int = 5, chat_id: Optional[str] = None) -> List[Dict]:
         """
         Search memories semantically (Green Vault only).
         
         Args:
             query: Search query
             n_results: Number of results
+            chat_id: Optional chat/session ID to prefer or filter by (AC-GV1)
         
         Returns:
             List of matching summaries from Green Vault
@@ -312,7 +317,7 @@ class MemoryManager:
             return []
         
         # Search Green Vault (safe summaries only)
-        return self.green_vault.query_context(query, n_results)
+        return self.green_vault.query_context(query, n_results, chat_id=chat_id)
     
     def get_recent(self, limit: int = 10) -> List[Dict]:
         """

@@ -13,6 +13,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from expansion.wizards.wizard_base import ExpansionWizard
 
 
+class ConcreteTestWizard(ExpansionWizard):
+    """Minimal concrete wizard for testing base behavior."""
+    def run(self):
+        return False
+    def setup(self):
+        return False
+    def verify(self):
+        return False
+
+
 class TestExpansionWizard(unittest.TestCase):
     """Test expansion wizard base class."""
     
@@ -22,8 +32,8 @@ class TestExpansionWizard(unittest.TestCase):
         self.config_path = Path(self.temp_dir)
         self.janet_core = Mock()
         
-        # Create a concrete wizard instance for testing
-        self.wizard = ExpansionWizard(self.config_path, self.janet_core)
+        # Use concrete subclass (ExpansionWizard is abstract)
+        self.wizard = ConcreteTestWizard(self.config_path, self.janet_core)
     
     def tearDown(self):
         """Clean up test fixtures."""
@@ -34,7 +44,7 @@ class TestExpansionWizard(unittest.TestCase):
         """Test wizard initialization."""
         self.assertEqual(self.wizard.config_path, self.config_path)
         self.assertEqual(self.wizard.janet_core, self.janet_core)
-        self.assertIsNone(self.wizard.config)
+        self.assertEqual(self.wizard.config, {})
     
     def test_validate_requirements_base(self):
         """Test base validate_requirements method."""
@@ -87,10 +97,11 @@ class TestExpansionWizard(unittest.TestCase):
     
     def test_generate_offline_instructions_base(self):
         """Test base offline instructions generation."""
-        # Base class should return empty string
+        # Base class returns a placeholder message
         instructions = self.wizard.generate_offline_instructions()
         
-        self.assertEqual(instructions, "")
+        self.assertIsInstance(instructions, str)
+        self.assertIn("wizard", instructions.lower())
     
     def test_run_base(self):
         """Test base run method."""

@@ -264,11 +264,16 @@ class TestExpansionIntegration(unittest.TestCase):
         state_file = self.config_path / "expansion_state.json"
         self.assertTrue(state_file.exists())
         
-        # Verify file contents
+        # Verify state file: enabled_expansions
         with open(state_file, 'r') as f:
             data = json.load(f)
             self.assertIn(ExpansionType.VOICE_IO, data.get("enabled_expansions", {}))
-            self.assertGreater(len(data.get("consent_records", [])), 0)
+        # Consent records are in expansion_consent.json
+        consent_file = self.config_path / "expansion_consent.json"
+        self.assertTrue(consent_file.exists(), "consent file should be written by save_expansion_state")
+        with open(consent_file, 'r') as f:
+            consent_data = json.load(f)
+            self.assertGreater(len(consent_data.get("consent_records", [])), 0)
 
 
 if __name__ == "__main__":

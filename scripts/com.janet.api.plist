@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.janet.api</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>JANET_SEED_PYTHON</string>
+        <string>JANET_SEED_PATH/janet_api_server.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>JANET_SEED_PATH</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/janet-api.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/janet-api.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin</string>
+    </dict>
+</dict>
+</plist>

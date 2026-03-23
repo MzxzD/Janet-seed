@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.janet.menubar</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>JANET_PYTHON</string>
+        <string>JANET_SEED_PATH/janet_menubar.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>JANET_SEED_PATH</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+    <key>StandardOutPath</key>
+    <string>/tmp/janet-menubar.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/janet-menubar.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin</string>
+    </dict>
+</dict>
+</plist>
