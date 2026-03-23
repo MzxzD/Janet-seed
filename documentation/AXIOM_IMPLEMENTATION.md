@@ -1,6 +1,6 @@
 # Axiom Implementation Map
 
-This document maps each of Janet's 16 constitutional axioms to their implementation in code.
+This document maps each of Janet's 20 constitutional axioms to their implementation in code.
 
 > **For users:** See the [User Guide](USER_GUIDE.md) for how to use these features.  
 > **For developers:** This document provides technical implementation details.

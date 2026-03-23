@@ -274,7 +274,7 @@ Results: 5/5 tests passed
 - ✅ **Multi-Model Support** - Switch between fast/balanced/powerful models
 - ✅ **Session Management** - Maintains conversation context
 - ✅ **Performance Tracking** - Monitor model performance and cache hits
-- ✅ **Constitutional AI** - Follows Janet's 16 axioms
+- ✅ **Constitutional AI** - Follows Janet's 20 axioms
 - ✅ **Privacy-First** - All processing local, no cloud
 - ✅ **Offline-Capable** - Works without internet
 

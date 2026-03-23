@@ -27,7 +27,7 @@ Welcome to J.A.N.E.T. Seed! This guide will help you get started and make the mo
 **J.A.N.E.T. Seed** (Just A Neat Evolving Thinker — Seed Edition) is a constitutional, offline-first AI companion designed to think *with* you, not *over* you.
 
 Janet is:
-- 🧠 **Constitutional** — Guided by 16 immutable axioms that ensure safety, privacy, and respect
+- 🧠 **Constitutional** — Guided by 20 immutable axioms that ensure safety, privacy, and respect
 - 🔐 **Offline-first** — Works entirely locally, no cloud required
 - 🌱 **Consent-driven** — Never expands capabilities without your explicit approval
 - 🧭 **Grounded** — Stays rooted in reality, interruptible at any time
@@ -94,7 +94,7 @@ Janet is:
 On your first run, Janet will:
 
 1. **Hardware Detection** — Automatically detects your system capabilities
-2. **Constitutional Briefing** — Presents Janet's 16 axioms
+2. **Constitutional Briefing** — Presents Janet's 20 axioms
 3. **Consent Gate** — Requires explicit consent before proceeding
 4. **Installation** — Sets up virtual environment and dependencies
 5. **Constitution Loading** — Loads and verifies constitutional integrity

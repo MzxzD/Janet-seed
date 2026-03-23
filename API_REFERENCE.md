@@ -790,7 +790,7 @@ watch -n 5 'curl -s http://localhost:8080/health | jq'
    - Rate limiting recommended for production
 
 4. **Constitutional AI**
-   - Janet follows 16 axioms
+   - Janet follows 20 axioms
    - Privacy-first design
    - No external data transmission
 

@@ -64,7 +64,7 @@ Janet now has the same permissions as Cursor Agent, including:
 ### Core Principles
 1. **Offline-first**: Always maintain offline capability
 2. **Privacy-first**: No cloud dependencies, cluster-only
-3. **Constitutional**: Follow 16 axioms
+3. **Constitutional**: Follow 20 axioms
 4. **Voice-first**: Natural conversation interface
 5. **Cross-platform**: Consistent experience everywhere
 6. **Open source**: GPL/MIT licensing

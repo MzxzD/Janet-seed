@@ -30,7 +30,7 @@ J.A.N.E.T. Seed is intentionally small, honest, and grounded.
 
 ## 🧬 Core Principles
 
-- **Constitution first** — 16 immutable axioms guide all behavior
+- **Constitution first** — 20 immutable axioms guide all behavior
 - **Presence before cognition** — Janet listens only when invited
 - **Consent over capability** — nothing expands unless you say yes
 - **Memory with restraint** — secrets are sacred, not data
@@ -66,7 +66,7 @@ flowchart TB
     Core -.->|Enforces| SoulCheck[Soul Check<br/>Axiom 10: State Verification]
     Core -.->|Enforces| MemoryGates[Memory Gates<br/>Axiom 9: Consent & Classification]
     
-    Constitution[constitution/<br/>16 Axioms + Memory Rules] -.->|Guides| Core
+    Constitution[constitution/<br/>20 Axioms + Memory Rules] -.->|Guides| Core
 ```
 
 All enforced by Janet's constitution.
@@ -170,7 +170,7 @@ python3 src/main.py --verify
 ### Supporting Modules
 
 - **[`constitution/`](constitution/README.md)** — Constitutional system
-  - `AXIOMS.md` - The 16 immutable axioms
+  - `AXIOMS.md` - The 20 immutable axioms
   - `MEMORY_CONSTITUTION.md` - Memory storage and protection principles
   - `protocols.md` - Detailed procedural guides
   - `personality.json` - Janet's identity and preferences
@@ -271,7 +271,7 @@ Janet now includes an OpenAI-compatible API server that works with Continue.dev 
 - `src/main.py` - Application entry point
 - `src/core/janet_core.py` - Main orchestrator class
 - `src/core/janet_brain.py` - Primary LLM response generator
-- `constitution/AXIOMS.md` - The 16 immutable axioms
+- `constitution/AXIOMS.md` - The 20 immutable axioms
 
 ### Component Relationships
 
@@ -290,7 +290,7 @@ graph LR
     Delegation --> Handlers[Handlers]
     Expansion --> Wizards[Wizards]
     
-    All[All Components] --> Constitution[Constitution<br/>16 Axioms]
+    All[All Components] --> Constitution[Constitution<br/>20 Axioms]
 ```
 
 ## Publish / release

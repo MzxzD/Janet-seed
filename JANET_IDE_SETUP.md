@@ -5,7 +5,7 @@
 This guide will help you set up Continue.dev with Janet as your primary LLM, giving you AI-powered coding assistance that's:
 - ✅ **Offline-first** - Works without internet
 - ✅ **Privacy-first** - Your code never leaves your machine
-- ✅ **Constitutional** - Follows 16 axioms including transparency and user sovereignty
+- ✅ **Constitutional** - Follows 20 axioms including transparency and user sovereignty
 - ✅ **Open source** - Full control over your AI assistant
 
 ---
@@ -297,7 +297,7 @@ Janet includes special constitutional commands:
 
 1. **Constitutional Check**
    - Command: `/constitutional-check`
-   - Reviews code against Janet's 16 axioms
+   - Reviews code against Janet's 20 axioms
    - Checks privacy, transparency, user sovereignty
 
 2. **Explain Constitutionally**
@@ -590,7 +590,7 @@ JANET_API_KEY=your-secure-key python3 janet_api_server.py
 
 **A:** Yes! Edit the system message in `~/.continue/config.yaml` to change Janet's personality, coding style, and priorities.
 
-### Q: What are the 16 constitutional axioms?
+### Q: What are the 20 constitutional axioms?
 
 **A:** Janet follows principles including:
 1. Privacy First

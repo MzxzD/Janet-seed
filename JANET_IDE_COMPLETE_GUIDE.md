@@ -34,7 +34,7 @@ Janet-Powered IDE is a complete integration that brings Janet's constitutional A
 - ⚡ **Autocomplete** (Tab) - Real-time code suggestions
 - 🔍 **Codebase Context** (@-mentions) - Reference files and symbols
 - 🔒 **Privacy-First** - All processing local, no cloud
-- 🌱 **Constitutional AI** - Follows 16 axioms
+- 🌱 **Constitutional AI** - Follows 20 axioms
 - 📡 **Offline-Capable** - Works without internet
 - 🔓 **Open Source** - Full control over your AI assistant
 
@@ -45,7 +45,7 @@ Janet-Powered IDE is a complete integration that brings Janet's constitutional A
 | Privacy | Cloud-based | 100% local |
 | Offline | Limited | Full support |
 | Open Source | No | Yes |
-| Constitutional AI | No | Yes (16 axioms) |
+| Constitutional AI | No | Yes (20 axioms) |
 | Custom Models | Limited | Any Ollama model |
 | Cost | Subscription | Free |
 | Data Ownership | Vendor | You |
@@ -560,7 +560,7 @@ Janet: The UserModel and AuthService interact in the following way...
 
 #### /constitutional-check
 
-Check code against Janet's 16 axioms:
+Check code against Janet's 20 axioms:
 
 ```
 You: /constitutional-check
@@ -1008,13 +1008,13 @@ curl http://localhost:8080/v1/performance | jq
 - **Offline:** Janet works offline, Copilot requires internet
 - **Cost:** Janet is free, Copilot requires subscription
 - **Models:** Janet supports any Ollama model, Copilot uses fixed models
-- **Constitutional:** Janet follows 16 axioms, Copilot doesn't
+- **Constitutional:** Janet follows 20 axioms, Copilot doesn't
 
 ### Q: Can I customize Janet's behavior?
 
 **A:** Yes! Edit the system message in `~/.continue/config.yaml` to change Janet's personality, coding style, and priorities.
 
-### Q: What are the 16 constitutional axioms?
+### Q: What are the 20 constitutional axioms?
 
 **A:** Janet follows principles including:
 1. Privacy First
@@ -1110,7 +1110,7 @@ You now have a complete Cursor-like IDE experience powered by Janet's constituti
 
 ✅ **Privacy-First** - Your code never leaves your machine  
 ✅ **Offline-Capable** - Works without internet  
-✅ **Constitutional** - Follows 16 axioms  
+✅ **Constitutional** - Follows 20 axioms  
 ✅ **Open Source** - Full control over your AI  
 ✅ **Free** - No subscriptions or hidden costs  
 ✅ **Powerful** - Full Cursor feature parity  
