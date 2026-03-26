@@ -893,7 +893,8 @@ async def _websocket_chat_session(websocket: WebSocket):
                     await websocket.send_text(json.dumps(response))
                 
                 elif msg_type == 'user_message':
-                    # Legacy format (for iOS app compatibility)
+                    # Legacy format (iOS CallJanet): echoes "id" so client can match pendingRequests
+                    client_msg_id = message.get("id")
                     user_text = message.get('text', '')
                     context_window = message.get('context_window', [])
                     
@@ -905,6 +906,8 @@ async def _websocket_chat_session(websocket: WebSocket):
                             'text': 'Janet brain not available',
                             'timestamp': datetime.now().isoformat()
                         }
+                        if client_msg_id:
+                            response["id"] = client_msg_id
                         await websocket.send_text(json.dumps(response))
                         continue
                     
@@ -928,6 +931,8 @@ async def _websocket_chat_session(websocket: WebSocket):
                         'text': response_text,
                         'timestamp': datetime.now().isoformat()
                     }
+                    if client_msg_id:
+                        response["id"] = client_msg_id
                     await websocket.send_text(json.dumps(response))
                 
                 elif msg_type == 'models':
