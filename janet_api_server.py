@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 try:
-    from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect
+    from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect, Body, Request
     from fastapi.responses import StreamingResponse, JSONResponse
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel, Field
@@ -32,9 +32,11 @@ except ImportError:
 
 try:
     from src.core.janet_brain import JanetBrain, RequestPriority
+    import litellm
     HAS_JANET_BRAIN = True
 except ImportError:
     HAS_JANET_BRAIN = False
+    litellm = None
     print("⚠️  JanetBrain not available. Check janet-seed installation.")
     sys.exit(1)
 
@@ -50,6 +52,10 @@ memory_manager = None  # MemoryManager for Green Vault (lazy init)
 
 # Session management (conversation context per session)
 sessions: Dict[str, Dict[str, Any]] = {}
+
+# Last command/response for HA (display in dashboard)
+_last_command: Optional[str] = None
+_last_response: Optional[str] = None
 
 # FastAPI app
 app = FastAPI(
@@ -84,6 +90,8 @@ class ChatCompletionRequest(BaseModel):
     frequency_penalty: Optional[float] = 0.0
     presence_penalty: Optional[float] = 0.0
     session_id: Optional[str] = None  # AC-GV1: chat_id for Green Vault / inactivity flush
+    tools: Optional[List[Dict[str, Any]]] = None  # Tool/function calling (Cursor Composer, agent mode)
+    tool_choice: Optional[Any] = None
 
 
 class ChatCompletionChoice(BaseModel):
@@ -197,6 +205,37 @@ def estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
+def _normalize_tool_args(args_str: str) -> str:
+    """
+    Normalize tool call arguments for Continue compatibility.
+    Qwen/Ollama may return XML-like args; Continue expects JSON.
+    """
+    if not args_str or not isinstance(args_str, str):
+        return args_str
+    s = args_str.strip()
+    # Already valid JSON?
+    try:
+        json.loads(s)
+        return s
+    except json.JSONDecodeError:
+        pass
+    # Try to parse XML-like <parameter=name>value</parameter>
+    import re
+    result = {}
+    for m in re.finditer(r"<parameter=([^>]+)>([^<]*)</parameter>", s, re.IGNORECASE):
+        key, val = m.group(1).strip(), m.group(2).strip()
+        if val.lower() == "true":
+            val = True
+        elif val.lower() == "false":
+            val = False
+        elif val.isdigit():
+            val = int(val)
+        result[key] = val
+    if result:
+        return json.dumps(result)
+    return s
+
+
 async def generate_streaming_response(
     user_message: str,
     context: Optional[Dict] = None,
@@ -258,6 +297,69 @@ async def generate_streaming_response(
     yield "data: [DONE]\n\n"
 
 
+async def generate_tool_calls_stream(out: Dict[str, Any]) -> AsyncGenerator[str, None]:
+    """
+    Stream tool_calls as OpenAI-compatible SSE for Continue.dev.
+    Continue expects stream=true and parses delta.tool_calls from chunks.
+    """
+    chunk_id = out.get("id") or f"chatcmpl-{uuid.uuid4().hex[:8]}"
+    model = out.get("model", DEFAULT_MODEL)
+    created = out.get("created", int(time.time()))
+    choices = out.get("choices", [])
+    if not choices:
+        yield "data: [DONE]\n\n"
+        return
+    choice = choices[0]
+    msg = choice.get("message", {})
+    tool_calls = msg.get("tool_calls") or []
+    finish_reason = choice.get("finish_reason", "stop")
+    if not tool_calls:
+        finish_reason = "stop"
+    # First chunk: role
+    yield f"data: {json.dumps({
+        'id': chunk_id,
+        'object': 'chat.completion.chunk',
+        'created': created,
+        'model': model,
+        'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]
+    })}\n\n"
+    # Second chunk: full tool_calls (Continue accepts single chunk)
+    delta_tool_calls = [
+        {
+            "index": i,
+            "id": tc.get("id", f"call_{uuid.uuid4().hex[:8]}"),
+            "type": "function",
+            "function": {
+                "name": tc.get("function", {}).get("name", ""),
+                "arguments": tc.get("function", {}).get("arguments", "{}")
+            }
+        }
+        for i, tc in enumerate(tool_calls)
+    ]
+    yield f"data: {json.dumps({
+        'id': chunk_id,
+        'object': 'chat.completion.chunk',
+        'created': created,
+        'model': model,
+        'choices': [{'index': 0, 'delta': {'tool_calls': delta_tool_calls}, 'finish_reason': finish_reason}]
+    })}\n\n"
+    yield "data: [DONE]\n\n"
+
+
+def _public_ws_chat_url(request: Request, path: str = "/ws") -> str:
+    """Build ws:// or wss:// URL for LAN/mDNS clients (e.g. Postman, web apps)."""
+    host = request.headers.get("host")
+    if not host:
+        netloc = request.url.netloc
+        host = netloc if netloc else f"127.0.0.1:{API_PORT}"
+    scheme = "wss" if request.url.scheme == "https" else "ws"
+    return f"{scheme}://{host}{path}"
+
+
+def _websocket_paths() -> List[str]:
+    return ["/ws", "/ws/chat"]
+
+
 # API Endpoints
 @app.get("/")
 async def root():
@@ -271,6 +373,11 @@ async def root():
             "chat": "/v1/chat/completions",
             "models": "/v1/models",
             "health": "/health",
+            "status": "/api/status",
+            "websocket_chat": "/ws",
+            "websocket_chat_alt": "/ws/chat",
+            "speak": "/api/speak",
+            "command": "/api/command",
             "learn": "/api/learn",
             "cloud_allowed": "/api/cloud-allowed",
             "cloud_allow": "/api/cloud-allow",
@@ -299,10 +406,17 @@ _server_start_time = time.time()
 
 
 @app.get("/api/status")
-async def api_status():
+async def api_status(request: Request):
     """Status endpoint for Home Assistant integration (sensors)"""
+    ws_primary = _public_ws_chat_url(request, "/ws")
+    ws_paths = _websocket_paths()
     if not janet_brain:
-        return {"state": "disconnected", "connected": False}
+        return {
+            "state": "disconnected",
+            "connected": False,
+            "websocket_chat": ws_primary,
+            "websocket_paths": ws_paths,
+        }
     
     mm = _get_memory_manager()
     memory_usage = 0
@@ -325,14 +439,65 @@ async def api_status():
         "model": janet_brain.model_name,
         "voice_enabled": False,
         "in_conversation": len(sessions) > 0,
-        "last_input": None,
-        "last_response": None,
+        "last_input": _last_command,
+        "last_response": _last_response,
         "turn_count": len(sessions),
         "memory_usage": memory_usage,
         "green_vault_entries": green_vault_entries,
         "blue_vault_active": blue_vault_active,
         "red_vault_entries": red_vault_entries,
+        "websocket_chat": ws_primary,
+        "websocket_paths": ws_paths,
     }
+
+
+@app.post("/api/speak")
+async def api_speak(data: dict = Body(default={})):
+    """
+    Make Janet speak a message (Home Assistant integration).
+    POST body: {"text": "message", "voice": "optional"}
+    """
+    message = (data or {}).get("text", "")
+    if not message:
+        raise HTTPException(status_code=400, detail="No message provided")
+    try:
+        from src.voice.tts import TextToSpeech
+        tts = TextToSpeech()
+        if tts.is_available():
+            tts.speak(message)
+        else:
+            print(f"📢 [speak] TTS unavailable, message logged: {message[:80]}...")
+    except Exception as e:
+        print(f"⚠️  [speak] TTS error: {e}, message logged: {message[:80]}...")
+    return {"status": "success", "message": message}
+
+
+@app.post("/api/command")
+async def api_command(data: dict = Body(default={})):
+    """
+    Send a voice command to Janet (Home Assistant integration).
+    POST body: {"command": "..."}
+    Processes via JanetBrain and returns response.
+    """
+    command_text = (data or {}).get("command", "").strip()
+    if not command_text:
+        raise HTTPException(status_code=400, detail="No command provided")
+    global janet_brain
+    if not janet_brain or not janet_brain.is_available():
+        raise HTTPException(status_code=503, detail="Janet brain not available")
+    try:
+        response_text = janet_brain.generate_response(
+            command_text,
+            context=None,
+            priority=RequestPriority.HIGH
+        )
+        global _last_command, _last_response
+        _last_command = command_text
+        _last_response = response_text
+        return {"status": "success", "command": command_text, "response": response_text}
+    except Exception as e:
+        print(f"⚠️  [command] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def _get_memory_manager():
@@ -534,6 +699,45 @@ async def chat_completions(
     if model != janet_brain.model_name and model in janet_brain.available_models:
         janet_brain.switch_model(model)
     
+    # Tool-calling path (Cursor Composer, agent mode) — forward to Ollama with tools
+    if request.tools:
+        try:
+            model_id = f"ollama/{model}" if "/" not in model else model
+            messages = [{"role": m.role, "content": m.content} for m in request.messages]
+            kwargs = {
+                "model": model_id,
+                "messages": messages,
+                "temperature": request.temperature or 0.7,
+                "max_tokens": request.max_tokens or 2000,
+                "tools": request.tools,
+            }
+            if request.tool_choice is not None:
+                kwargs["tool_choice"] = request.tool_choice
+            resp = litellm.completion(**kwargs)
+            # Convert to OpenAI-compatible dict (handles tool_calls)
+            to_dict = getattr(resp, "model_dump", None) or getattr(resp, "dict", None)
+            out = to_dict() if to_dict else {}
+            out["id"] = out.get("id") or f"chatcmpl-{uuid.uuid4().hex[:8]}"
+            out["model"] = model
+            # Normalize tool_calls for Continue (XML-like args → JSON)
+            for choice in out.get("choices", []):
+                msg = choice.get("message", {})
+                for tc in msg.get("tool_calls", []) or []:
+                    fn = tc.get("function", {})
+                    if isinstance(fn.get("arguments"), str):
+                        fn["arguments"] = _normalize_tool_args(fn["arguments"])
+            print(f"✅ Tool-call response ({len(request.tools)} tools available)")
+            # Continue expects stream=true — return SSE when requested
+            if request.stream:
+                return StreamingResponse(
+                    generate_tool_calls_stream(out),
+                    media_type="text/event-stream"
+                )
+            return JSONResponse(content=out)
+        except Exception as e:
+            print(f"⚠️  Tool-call path failed: {e}")
+            # Fall through to normal path (ignore tools)
+    
     # Handle streaming vs non-streaming
     if request.stream:
         # Streaming response
@@ -608,13 +812,12 @@ async def red_thread(authorization: Optional[str] = Header(None)):
     }
 
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for Janet CLI and other real-time clients"""
+async def _websocket_chat_session(websocket: WebSocket):
+    """Shared WebSocket chat loop (OpenAI-style messages, legacy user_message, ping, models)."""
     print(f"🔌 WebSocket connection attempt from {websocket.client}")
     await websocket.accept()
     print(f"🔌 WebSocket client connected and accepted")
-    
+
     try:
         while True:
             # Receive message from client
@@ -788,6 +991,18 @@ async def websocket_endpoint(websocket: WebSocket):
             pass
 
 
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket chat — same protocol as /ws/chat."""
+    await _websocket_chat_session(websocket)
+
+
+@app.websocket("/ws/chat")
+async def websocket_chat_endpoint(websocket: WebSocket):
+    """Alias for /ws (easier discovery in docs and Postman)."""
+    await _websocket_chat_session(websocket)
+
+
 def initialize_janet_brain():
     """Initialize the global JanetBrain instance"""
     global janet_brain
@@ -848,6 +1063,7 @@ def main():
     print(f"\nAPI Endpoint: http://{API_HOST}:{API_PORT}/v1/chat/completions")
     print(f"Models Endpoint: http://{API_HOST}:{API_PORT}/v1/models")
     print(f"Health Check: http://{API_HOST}:{API_PORT}/health")
+    print(f"WebSocket chat: ws://<host>:{API_PORT}/ws (alias: /ws/chat)")
     print("\nConfigure Continue.dev with:")
     print(f"  apiBase: http://localhost:{API_PORT}/v1")
     print(f"  apiKey: {API_KEY}")
