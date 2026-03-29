@@ -139,6 +139,41 @@ curl http://localhost:8080/health
 
 ---
 
+### Status (HTTP + WebSocket hints)
+
+**GET /api/status**
+
+Home Assistant / dashboard friendly. Includes **`websocket_chat`** (full `ws://` or `wss://` URL derived from the request `Host` header) and **`websocket_paths`** (`/ws`, `/ws/chat`).
+
+**Example:**
+```bash
+curl http://janet-1.local:8080/api/status
+```
+
+---
+
+### WebSocket chat (same port as HTTP API)
+
+**WebSocket** `ws://<host>:8080/ws` — alias: **`/ws/chat`**
+
+Real-time chat on **the same server** as `/api/status` (port **8080**), distinct from the CallJanet-style WebSocket on **8765** if you run `simple_websocket_server.py` separately.
+
+**Authentication:** None on the socket (LAN/trust boundary — do not expose raw to the public internet without TLS and auth).
+
+**Message formats (JSON text frames):**
+
+1. **OpenAI-style** — object with `model` and `messages` (same shape as `POST /v1/chat/completions` body). Response: JSON with `choices[0].message.content`.
+
+2. **Legacy** — `{"type":"user_message","text":"Hello","context_window":[]}` — response: `{"type":"janet_response","text":"...","timestamp":"..."}`.
+
+3. **`{"type":"ping"}`** — response: `{"type":"pong",...}`.
+
+4. **`{"type":"models"}`** — list models when brain is up.
+
+**Postman:** New → WebSocket → `ws://janet-1.local:8080/ws` → Connect → send a JSON message.
+
+---
+
 ### List Models
 
 **GET /v1/models**

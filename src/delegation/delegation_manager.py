@@ -15,6 +15,7 @@ from .handlers.image_handler import ImageProcessingHandler
 from .handlers.home_automation_handler import HomeAutomationHandler
 from .handlers.home_assistant_dashboard_handler import HomeAssistantDashboardHandler
 from .handlers.blender_handler import BlenderHandler
+from .blender_reference import blender_delegation_touches_disk
 from .handlers.media_storage_handler import MediaStorageHandler
 from .litellm_router import LiteLLMRouter, TaskType
 from .n8n_client import N8NClient
@@ -205,11 +206,24 @@ class DelegationManager:
             timeout=timeout
         )
         
-        # Require confirmation if enabled
+        # Require confirmation if enabled (Axiom 10: explicit copy for disk paths)
         if self.require_confirmation and confirm_callback:
-            confirmation_message = (
-                f"Delegate {task_description} to {handlers[0].name}?"
-            )
+            if capability == HandlerCapability.THREE_D_MODELLING and blender_delegation_touches_disk(
+                input_data, task_description
+            ):
+                path_hint = (
+                    input_data.get("mesh_path")
+                    or input_data.get("reference_image_path")
+                    or "(path parsed from request)"
+                )
+                confirmation_message = (
+                    f"Soul Check — Blender will read a local file: {path_hint}. "
+                    f"Allow {handlers[0].name} for: {task_description}?"
+                )
+            else:
+                confirmation_message = (
+                    f"Delegate {task_description} to {handlers[0].name}?"
+                )
             if not confirm_callback(confirmation_message):
                 return None
         

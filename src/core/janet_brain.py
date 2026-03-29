@@ -29,6 +29,22 @@ try:
 except ImportError:
     RED_THREAD_EVENT = None
 
+try:
+    from src.core.phrase_memory import PhraseMemory
+except ImportError:
+    try:
+        from core.phrase_memory import PhraseMemory
+    except ImportError:
+        PhraseMemory = None  # type: ignore[misc, assignment]
+
+try:
+    from src.core.context_fusion import build_fused_user_prompt
+except ImportError:
+    try:
+        from core.context_fusion import build_fused_user_prompt
+    except ImportError:
+        build_fused_user_prompt = None  # type: ignore[misc, assignment]
+
 if TYPE_CHECKING:
     from src.delegation.delegation_manager import DelegationManager
     from src.delegation.handlers.base import HandlerCapability
@@ -36,11 +52,15 @@ if TYPE_CHECKING:
 try:
     from src.delegation.delegation_manager import DelegationManager
     from src.delegation.handlers.base import HandlerCapability
+    from src.delegation.blender_reference import extract_path_from_query
     DELEGATION_AVAILABLE = True
 except ImportError:
     DELEGATION_AVAILABLE = False
     DelegationManager = None
     HandlerCapability = None
+
+    def extract_path_from_query(_: str):  # type: ignore
+        return None
 
 
 # MARK: - Supporting Classes
@@ -183,7 +203,8 @@ class JanetBrain:
         self,
         model_name: str = "tinyllama:1.1b",
         delegation_manager: Optional[DelegationManager] = None,
-        memory_manager=None
+        memory_manager=None,
+        phrase_memory: Optional[Any] = None,
     ):
         """
         Initialize JanetBrain.
@@ -192,10 +213,18 @@ class JanetBrain:
             model_name: Ollama model name to use (default: tinyllama:1.1b)
             delegation_manager: DelegationManager instance for task delegation
             memory_manager: MemoryManager instance for context retrieval
+            phrase_memory: Optional PhraseMemory (Engram-style local lookup); auto-created if None
         """
         self.model_name = model_name
         self.delegation_manager = delegation_manager
         self.memory_manager = memory_manager
+        self.phrase_memory: Optional[Any] = phrase_memory
+        if self.phrase_memory is None and PhraseMemory is not None:
+            try:
+                self.phrase_memory = PhraseMemory()
+            except Exception as e:
+                print(f"⚠️  PhraseMemory disabled: {e}")
+                self.phrase_memory = None
         self.available = False
         self.pending_delegations: Dict[str, Dict] = {}  # Track async delegations
         
@@ -531,24 +560,28 @@ Aider context (when used as coding assistant): You have access to /add, /read-on
             return "I'm sorry, I encountered an error generating a response."
     
     def _build_prompt(self, user_input: str, context: Optional[Dict]) -> str:
-        """Build prompt with context."""
+        """Build user-role prompt via central context fusion (janet-seed)."""
+        if build_fused_user_prompt is not None:
+            return build_fused_user_prompt(
+                user_input, context, self.phrase_memory
+            ).prompt
+        # Fallback if context_fusion import failed
         prompt_parts = [user_input]
-        
         if context:
-            # Add memory context
             if "relevant_memories" in context:
                 memories = context["relevant_memories"]
                 if memories:
                     prompt_parts.append("\n\nRelevant context from past conversations:")
-                    for mem in memories[:3]:  # Limit to 3 most relevant
+                    for mem in memories[:3]:
                         prompt_parts.append(f"- {mem.get('text', '')[:100]}")
-            
-            # Add tone context
             if "tone" in context:
                 tone = context["tone"]
                 if tone.get("emotion"):
                     prompt_parts.append(f"\n\nUser's emotional tone: {tone.get('emotion')}")
-        
+        if self.phrase_memory:
+            block, _key = self.phrase_memory.build_injection_block(user_input, context)
+            if block:
+                prompt_parts.append(block)
         return "\n".join(prompt_parts)
     
     def _check_delegation(self, user_input: str, context: Optional[Dict]) -> Optional[Dict]:
@@ -583,6 +616,41 @@ Aider context (when used as coding assistant): You have access to /add, /read-on
                     "capability": HandlerCapability.MEDIA_STORAGE,
                     "task_description": "Store media in Green Vault",
                     "input_data": {"file_path": file_path, "media_type": media_type, "user_query": user_input}
+                }
+
+        # Blender: explicit file paths (mesh import or reference image) before generic "image"
+        bp = extract_path_from_query(user_input)
+        if bp:
+            pl = bp.lower()
+            mesh_ext = pl.endswith((".glb", ".gltf", ".obj", ".fbx", ".stl", ".ply"))
+            img_ext = pl.endswith((".png", ".jpg", ".jpeg", ".webp"))
+            blender_ctx = any(
+                x in user_lower
+                for x in (
+                    "blender",
+                    "3d",
+                    "import",
+                    "load mesh",
+                    "mesh",
+                    "model",
+                    "reference image",
+                    "image plane",
+                    "backdrop",
+                    "trace",
+                    "blockout",
+                )
+            )
+            if mesh_ext:
+                return {
+                    "capability": HandlerCapability.THREE_D_MODELLING,
+                    "task_description": f"3D modelling: {user_input}",
+                    "input_data": {"user_query": user_input},
+                }
+            if img_ext and blender_ctx:
+                return {
+                    "capability": HandlerCapability.THREE_D_MODELLING,
+                    "task_description": f"3D modelling: {user_input}",
+                    "input_data": {"user_query": user_input},
                 }
 
         # Check for image processing requests
@@ -635,9 +703,30 @@ Aider context (when used as coding assistant): You have access to /add, /read-on
 
         # Check for 3D modelling / Blender requests
         blender_keywords = [
-            "blender", "3d", "create in 3d", "model in 3d",
-            "create a scene", "make a 3d", "add a cube", "add cube",
-            "add a sphere", "add sphere", "create a cube", "create cube"
+            "blender",
+            "3d",
+            "create in 3d",
+            "model in 3d",
+            "create a scene",
+            "make a 3d",
+            "add a cube",
+            "add cube",
+            "add a sphere",
+            "add sphere",
+            "create a cube",
+            "create cube",
+            "import glb",
+            "import obj",
+            "import fbx",
+            "import stl",
+            "import mesh",
+            "load mesh",
+            "load glb",
+            "gltf",
+            "reference image",
+            "image plane",
+            "backdrop",
+            "mesh in blender",
         ]
         if any(keyword in user_lower for keyword in blender_keywords):
             return {

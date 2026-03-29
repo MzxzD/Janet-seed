@@ -93,6 +93,7 @@ import time
 import threading
 import shutil
 from pathlib import Path
+from typing import Optional
 
 # Unload LaunchAgent on any exit (Cmd+Q, system Quit, etc.) so launchd won't restart us.
 # Sync unload: launchd will SIGTERM us, so we exit cleanly without a restart loop.
@@ -148,6 +149,79 @@ MODELS = {
 }
 # Presets for "Pull model" submenu (offline/online via ollama pull)
 PULL_PRESETS = list(MODELS.keys())
+
+# English TTS: LaunchAgent plist presets (see scripts/janet_tts_launchd_preset.py)
+TTS_PRESET_ORDER = [
+    "en-piper-lessac",
+    "en-piper-amy",
+    "en-piper-ljspeech",
+    "en-piper-kristin",
+    "en-piper-hfc-female",
+    "en-piper-ryan",
+    "en-say-female",
+    "en-good-place-janet",
+    "en-lynda-business",
+]
+TTS_PRESET_LABELS = {
+    "en-piper-lessac": "Piper · Lessac (OSS)",
+    "en-piper-amy": "Piper · Amy (OSS)",
+    "en-piper-ljspeech": "Piper · LJSpeech (OSS)",
+    "en-piper-kristin": "Piper · Kristin (OSS)",
+    "en-piper-hfc-female": "Piper · HFC female (OSS)",
+    "en-piper-ryan": "Piper · Ryan (OSS)",
+    "en-say-female": "macOS say · English (default)",
+    "en-good-place-janet": "macOS say · Good Place pace",
+    "en-lynda-business": "macOS say · Lynda / business",
+}
+# Map plist JANET_PIPER_EN_MODEL basename → preset id (for checkmarks)
+_TTS_ONNX_TO_PRESET = {
+    "en_US-lessac-medium.onnx": "en-piper-lessac",
+    "en_US-amy-medium.onnx": "en-piper-amy",
+    "en_US-ljspeech-medium.onnx": "en-piper-ljspeech",
+    "en_US-kristin-medium.onnx": "en-piper-kristin",
+    "en_US-hfc_female-medium.onnx": "en-piper-hfc-female",
+    "en_US-ryan-high.onnx": "en-piper-ryan",
+}
+
+
+def _janet_seed_dir() -> Path:
+    return Path(os.environ.get("JANET_SEED_DIR", str(JANET_DIR))).resolve()
+
+
+def _tts_preset_status_json() -> Optional[dict]:
+    """Run janet_tts_launchd_preset.py status; return decoded JSON or None."""
+    script = _janet_seed_dir() / "scripts" / "janet_tts_launchd_preset.py"
+    if not script.is_file():
+        return None
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(script), "status"],
+            capture_output=True,
+            text=True,
+            timeout=12,
+        )
+        if proc.returncode != 0 or not (proc.stdout or "").strip():
+            return None
+        return json.loads(proc.stdout.strip())
+    except (json.JSONDecodeError, subprocess.TimeoutExpired, OSError):
+        return None
+
+
+def _infer_tts_active_preset(status: dict) -> Optional[str]:
+    """Match current plist TTS env to a TTS_PRESET_ORDER id (best effort)."""
+    if not status.get("ok"):
+        return None
+    env = status.get("tts_env") or {}
+    model = (env.get("JANET_PIPER_EN_MODEL") or "").strip()
+    if model:
+        key = Path(model).name
+        return _TTS_ONNX_TO_PRESET.get(key)
+    raw = (env.get("JANET_TTS_EN_PRESET") or "").strip().lower().replace("_", "-")
+    if raw in ("good-place-janet", "tgp-janet"):
+        return "en-good-place-janet"
+    if raw in ("lynda", "lynda-business"):
+        return "en-lynda-business"
+    return "en-say-female"
 
 
 def get_ollama_models():
@@ -271,12 +345,30 @@ class JanetMenuBar(rumps.App):
             self.menu.add(rumps.MenuItem("▶️ Start Server", callback=self.start_server))
         self.menu.add(rumps.MenuItem("📊 View Logs", callback=self.view_logs))
         self.menu.add(rumps.MenuItem("🔧 Open Config", callback=self.open_config))
+        self.menu.add(rumps.MenuItem("💬 Janet Chat…", callback=self.open_janet_chat))
         self.menu.add(rumps.MenuItem("💬 New chat with Janet (Aider)", callback=self.quick_aider))
         self.menu.add(rumps.MenuItem("🔄 Restart menu bar", callback=self.restart_menubar))
 
         # Settings submenu
         settings_menu = rumps.MenuItem("⚙️ Settings", callback=None)
         settings_menu.add(rumps.MenuItem("API URL…", callback=self.settings_api_url))
+        tts_status = _tts_preset_status_json()
+        active_tts = _infer_tts_active_preset(tts_status) if tts_status else None
+        tts_menu = rumps.MenuItem("🔊 English TTS preset", callback=None)
+        _tts_script = _janet_seed_dir() / "scripts" / "janet_tts_launchd_preset.py"
+        if not _tts_script.is_file():
+            tts_menu.add(
+                rumps.MenuItem("(janet_tts_launchd_preset.py missing — update janet-seed)", callback=None)
+            )
+        else:
+            for preset_id in TTS_PRESET_ORDER:
+                label = TTS_PRESET_LABELS.get(preset_id, preset_id)
+                mark = "✓ " if preset_id == active_tts else "   "
+                item = rumps.MenuItem(f"{mark}{label}", callback=self.settings_tts_preset)
+                item.tts_preset_id = preset_id
+                item.tts_preset_label = label
+                tts_menu.add(item)
+        settings_menu.add(tts_menu)
         mem_menu = rumps.MenuItem("Memory", callback=None)
         config = load_menubar_config()
         inactivity = config.get("inactivity_min", 10)
@@ -487,6 +579,59 @@ class JanetMenuBar(rumps.App):
                 sound=False,
             )
 
+    def settings_tts_preset(self, sender):
+        """Apply English TTS LaunchAgent preset (same as janet_tts_launchd_preset.py apply … --restart)."""
+        preset_id = getattr(sender, "tts_preset_id", None)
+        label = getattr(sender, "tts_preset_label", None) or preset_id or ""
+        if not preset_id:
+            return
+        rumps.notification(
+            title="Janet",
+            subtitle="English TTS",
+            message=f"Applying “{label}”…",
+            sound=False,
+        )
+        threading.Thread(
+            target=self._tts_apply_preset_worker,
+            args=(preset_id, label),
+            daemon=True,
+        ).start()
+
+    def _tts_apply_preset_worker(self, preset_id: str, label: str):
+        script = _janet_seed_dir() / "scripts" / "janet_tts_launchd_preset.py"
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(script), "apply", preset_id, "--restart"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            rumps.notification(
+                title="Janet",
+                subtitle="TTS preset timed out",
+                message=preset_id,
+                sound=False,
+            )
+            return
+        if proc.returncode != 0:
+            detail = (proc.stdout or proc.stderr or "").strip()
+            if len(detail) > 280:
+                detail = detail[:277] + "…"
+            rumps.notification(
+                title="Janet",
+                subtitle="TTS preset failed",
+                message=detail or str(proc.returncode),
+                sound=False,
+            )
+            return
+        rumps.notification(
+            title="Janet",
+            subtitle="English TTS updated",
+            message=f"{label} — reloading Janet…",
+            sound=True,
+        )
+
     def settings_api_url(self, _):
         """Edit API URL via dialog and save to config."""
         config = load_menubar_config()
@@ -527,6 +672,24 @@ class JanetMenuBar(rumps.App):
         self.update_menu()
         on_off = "On" if config["save_context_when_idle"] else "Off"
         rumps.notification(title="Janet", subtitle="Remember after idle", message=on_off, sound=False)
+
+    def open_janet_chat(self, _):
+        """Open in-browser chat UI (GET /chat on Janet API)."""
+        base = get_api_url().rstrip("/")
+        url = f"{base}/chat"
+        try:
+            r = requests.get(f"{base}/health", timeout=2)
+            if r.status_code != 200:
+                raise RuntimeError("Server not healthy")
+        except Exception:
+            rumps.notification(
+                title="Janet",
+                subtitle="Chat unavailable",
+                message="Start or restart the Janet server, then try again.",
+                sound=False,
+            )
+            return
+        subprocess.run(["open", url])
 
     def quick_aider(self, _):
         """Open new Terminal and run Aider (chat with Janet). Uses Documents/.aider.conf.yml if present."""

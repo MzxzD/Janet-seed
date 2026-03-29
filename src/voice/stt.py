@@ -5,8 +5,9 @@ import os
 import sys
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional, Callable, Dict, Any
 import json
 
 try:
@@ -166,5 +167,42 @@ def get_default_stt() -> Optional[SpeechToText]:
     try:
         return SpeechToText(model_size="base")
     except Exception:
+        return None
+
+
+_whisper_singleton: Optional[tuple] = None  # (model_size: str, model)
+_whisper_singleton_lock = threading.Lock()
+
+
+def transcribe_media_file(
+    path: str,
+    model_size: Optional[str] = None,
+    language: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Transcribe an audio file with Whisper (offline). No microphone / sounddevice required.
+    Supports formats Whisper/ffmpeg can decode (e.g. wav, webm, m4a).
+    """
+    if not HAS_WHISPER:
+        return None
+    ms = (model_size or os.getenv("JANET_WHISPER_MODEL_SIZE", "base") or "base").strip()
+    global _whisper_singleton
+    try:
+        with _whisper_singleton_lock:
+            if _whisper_singleton is None or _whisper_singleton[0] != ms:
+                print(f"Loading Whisper model ({ms}) for HTTP transcribe…")
+                _whisper_singleton = (ms, whisper.load_model(ms))
+            model = _whisper_singleton[1]
+        lang = language
+        if lang is not None and str(lang).strip().lower() in ("", "auto"):
+            lang = None
+        result = model.transcribe(str(path), language=lang, task="transcribe")
+        text = (result.get("text") or "").strip()
+        return {
+            "text": text,
+            "language": result.get("language"),
+        }
+    except Exception as e:
+        print(f"⚠️  transcribe_media_file failed: {e}")
         return None
 

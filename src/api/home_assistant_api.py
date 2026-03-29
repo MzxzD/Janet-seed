@@ -83,31 +83,45 @@ def speak():
         
         message = data.get('text', '')
         voice = data.get('voice')
-        
+        lang = data.get('lang') or data.get('language')
+
         if not message:
             return jsonify({"error": "No message provided"}), 400
-        
+
         _LOGGER.info(f"Speak request: {message} (voice: {voice})")
-        
-        # TODO: Integrate with Janet's TTS system
-        # For now, just log it
+
+        outcome_dict = None
         if janet_core:
-            # Try to use TTS if available
             try:
-                from src.voice.tts import TextToSpeech
+                from src.voice.tts import SpeakOutcome, TextToSpeech, resolve_speak_lang
+
                 tts = TextToSpeech()
                 if tts.is_available():
-                    tts.speak(message)
+                    outcome = tts.speak(message, lang=lang)
+                    outcome_dict = outcome.as_dict()
                 else:
                     _LOGGER.warning("TTS not available, message logged only")
+                    outcome_dict = SpeakOutcome(
+                        spoken=False,
+                        skipped=True,
+                        resolved_lang=resolve_speak_lang(message, lang),
+                        reason="tts_unavailable",
+                    ).as_dict()
             except Exception as e:
                 _LOGGER.warning(f"TTS error: {e}, message logged only")
-        
-        return jsonify({
-            "status": "success",
-            "message": message,
-            "voice": voice
-        }), 200
+                from src.voice.tts import SpeakOutcome, resolve_speak_lang
+
+                outcome_dict = SpeakOutcome(
+                    spoken=False,
+                    skipped=True,
+                    resolved_lang=resolve_speak_lang(message, lang),
+                    reason="error",
+                ).as_dict()
+
+        payload = {"status": "success", "message": message, "voice": voice}
+        if outcome_dict:
+            payload.update(outcome_dict)
+        return jsonify(payload), 200
         
     except Exception as e:
         _LOGGER.error(f"Error in speak endpoint: {e}")

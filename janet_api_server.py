@@ -6,9 +6,11 @@ Wraps JanetBrain to provide Continue.dev and other IDE extensions with Janet's c
 import os
 import sys
 import time
+from html import escape as html_escape
 import uuid
 import json
 import asyncio
+import tempfile
 from typing import Dict, List, Optional, Any, AsyncGenerator
 from datetime import datetime
 from pathlib import Path
@@ -19,8 +21,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 try:
-    from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect, Body
-    from fastapi.responses import StreamingResponse, JSONResponse
+    from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect, Body, Request, File, UploadFile, Query
+    from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel, Field
     import uvicorn
@@ -72,6 +74,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from src.api.tts_tldr_plugin import (
+    apply_tldr_defaults_to_speak_body,
+    load_defaults_from_disk,
+    router as tts_tldr_router,
+)
+
+load_defaults_from_disk()
+app.include_router(tts_tldr_router)
 
 
 # Pydantic models for OpenAI compatibility
@@ -139,6 +150,23 @@ class LearnResponse(BaseModel):
     status: str
     memory_id: Optional[str] = None
     stored: bool
+
+
+class PhraseMemoryUpsertRequest(BaseModel):
+    """Request body for POST /api/phrase-memory/entry (Engram-inspired local lookup)."""
+    mode: str = Field(default="tail", description="tail | full")
+    pattern: str = Field(..., description="Tail phrase or full short utterance (normalized for hashing)")
+    inject: str = Field(..., description="Unverified text fused into prompt on match")
+    confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+
+
+class PhraseMemoryUpsertResponse(BaseModel):
+    status: str
+    key_id: str
+
+
+class PhraseMemoryDeleteRequest(BaseModel):
+    key_id: str = Field(..., description="Key returned from upsert")
 
 
 class CloudAllowRequest(BaseModel):
@@ -346,6 +374,20 @@ async def generate_tool_calls_stream(out: Dict[str, Any]) -> AsyncGenerator[str,
     yield "data: [DONE]\n\n"
 
 
+def _public_ws_chat_url(request: Request, path: str = "/ws") -> str:
+    """Build ws:// or wss:// URL for LAN/mDNS clients (e.g. Postman, web apps)."""
+    host = request.headers.get("host")
+    if not host:
+        netloc = request.url.netloc
+        host = netloc if netloc else f"127.0.0.1:{API_PORT}"
+    scheme = "wss" if request.url.scheme == "https" else "ws"
+    return f"{scheme}://{host}{path}"
+
+
+def _websocket_paths() -> List[str]:
+    return ["/ws", "/ws/chat"]
+
+
 # API Endpoints
 @app.get("/")
 async def root():
@@ -360,14 +402,37 @@ async def root():
             "models": "/v1/models",
             "health": "/health",
             "status": "/api/status",
+            "websocket_chat": "/ws",
+            "websocket_chat_alt": "/ws/chat",
             "speak": "/api/speak",
+            "tts_tldr_defaults_get": "/api/tts/tldr-defaults",
+            "tts_tldr_defaults_patch": "/api/tts/tldr-defaults",
             "command": "/api/command",
             "learn": "/api/learn",
             "cloud_allowed": "/api/cloud-allowed",
             "cloud_allow": "/api/cloud-allow",
-            "cloud_id_verify": "/api/cloud-id-verify"
+            "cloud_id_verify": "/api/cloud-id-verify",
+            "chat_ui": "/chat",
+            "transcribe": "/api/transcribe",
         }
     }
+
+
+@app.get("/chat", response_class=HTMLResponse, include_in_schema=False)
+async def janet_chat_ui():
+    """
+    Minimal browser chat UI for the Janet menu bar (open via Janet Chat…).
+    Same-origin requests to /health and /v1/chat/completions.
+    """
+    path = Path(__file__).resolve().parent / "web" / "janet_chat.html"
+    if not path.is_file():
+        raise HTTPException(status_code=500, detail="chat UI file missing (web/janet_chat.html)")
+    raw = path.read_text(encoding="utf-8")
+    key = ""
+    if API_KEY and str(API_KEY).strip().lower() != "none":
+        key = str(API_KEY).strip()
+    raw = raw.replace("__JANET_API_KEY__", html_escape(key, quote=True))
+    return HTMLResponse(content=raw)
 
 
 @app.get("/health")
@@ -390,10 +455,17 @@ _server_start_time = time.time()
 
 
 @app.get("/api/status")
-async def api_status():
+async def api_status(request: Request):
     """Status endpoint for Home Assistant integration (sensors)"""
+    ws_primary = _public_ws_chat_url(request, "/ws")
+    ws_paths = _websocket_paths()
     if not janet_brain:
-        return {"state": "disconnected", "connected": False}
+        return {
+            "state": "disconnected",
+            "connected": False,
+            "websocket_chat": ws_primary,
+            "websocket_paths": ws_paths,
+        }
     
     mm = _get_memory_manager()
     memory_usage = 0
@@ -423,6 +495,8 @@ async def api_status():
         "green_vault_entries": green_vault_entries,
         "blue_vault_active": blue_vault_active,
         "red_vault_entries": red_vault_entries,
+        "websocket_chat": ws_primary,
+        "websocket_paths": ws_paths,
     }
 
 
@@ -430,21 +504,106 @@ async def api_status():
 async def api_speak(data: dict = Body(default={})):
     """
     Make Janet speak a message (Home Assistant integration).
-    POST body: {"text": "message", "voice": "optional"}
+    POST body: {"text": "...", "lang": "en"|"hr"|"de-at"|"ja"|"auto" optional,
+    "voice": "Lana" optional (macOS say voice for this utterance),
+    "engine": "say"|"piper"|"auto" optional (per-request; default from JANET_TTS_ENGINE),
+    "piper_speaker": 0 optional (multi-speaker Piper models, e.g. HR surrogate).}
+    Response includes backend, voice_used when spoken, plus resolved_lang, spoken, skipped, etc.
+    Omitted lang/voice/engine (and optional piper_speaker) merge from PATCH /api/tts/tldr-defaults (no restart).
     """
-    message = (data or {}).get("text", "")
+    data = dict(data or {})
+    apply_tldr_defaults_to_speak_body(data)
+    message = data.get("text", "")
     if not message:
         raise HTTPException(status_code=400, detail="No message provided")
+    lang = data.get("lang") or data.get("language")
+    voice = data.get("voice")
+    engine = data.get("engine")
+    ps = data.get("piper_speaker")
+    piper_speaker: Optional[int] = None
+    if ps is not None and str(ps).strip() != "":
+        try:
+            piper_speaker = int(ps)
+        except (TypeError, ValueError):
+            piper_speaker = None
+    from src.voice.tts import SpeakOutcome, TextToSpeech, resolve_speak_lang
+
     try:
-        from src.voice.tts import TextToSpeech
         tts = TextToSpeech()
         if tts.is_available():
-            tts.speak(message)
+            outcome = tts.speak(
+                message,
+                lang=lang,
+                voice=voice,
+                engine=engine,
+                piper_speaker=piper_speaker,
+            )
         else:
             print(f"📢 [speak] TTS unavailable, message logged: {message[:80]}...")
+            outcome = SpeakOutcome(
+                spoken=False,
+                skipped=True,
+                resolved_lang=resolve_speak_lang(message, lang),
+                reason="tts_unavailable",
+            )
     except Exception as e:
         print(f"⚠️  [speak] TTS error: {e}, message logged: {message[:80]}...")
-    return {"status": "success", "message": message}
+        outcome = SpeakOutcome(
+            spoken=False,
+            skipped=True,
+            resolved_lang=resolve_speak_lang(message, lang),
+            reason="error",
+        )
+    return {"status": "success", "message": message, **outcome.as_dict()}
+
+
+@app.post("/api/transcribe")
+async def api_transcribe(
+    audio: UploadFile = File(..., description="Recorded audio (webm, wav, m4a, …)"),
+    language: Optional[str] = Query(
+        None,
+        description="Optional Whisper language code (e.g. en, hr). Omit for auto-detect.",
+    ),
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Offline speech-to-text via Whisper (local). Requires ``openai-whisper`` and ffmpeg for most formats.
+    Send multipart form field ``audio`` with the file. Same API key as ``/v1/chat/completions`` when auth is enabled.
+    """
+    if not verify_api_key(authorization):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    try:
+        from src.voice.stt import HAS_WHISPER, transcribe_media_file
+    except ImportError:
+        HAS_WHISPER = False
+    if not HAS_WHISPER:
+        raise HTTPException(
+            status_code=503,
+            detail="Whisper not installed: pip install openai-whisper (ffmpeg recommended for webm/mp3)",
+        )
+    raw_name = audio.filename or "rec.webm"
+    suffix = Path(raw_name).suffix
+    if not suffix or len(suffix) > 8:
+        suffix = ".webm"
+    fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+    os.close(fd)
+    try:
+        content = await audio.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="empty audio upload")
+        Path(tmp_path).write_bytes(content)
+        out = transcribe_media_file(tmp_path, language=language)
+        if out is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Transcription failed (check ffmpeg, audio format, and logs)",
+            )
+        return {"status": "ok", "text": out.get("text", ""), "language": out.get("language")}
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 @app.post("/api/command")
@@ -532,6 +691,59 @@ async def api_learn(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/phrase-memory/stats")
+async def api_phrase_memory_stats(authorization: Optional[str] = Header(None)):
+    """Stats and paths for Engram-style phrase memory (orchestration layer)."""
+    if not verify_api_key(authorization):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    global janet_brain
+    if not janet_brain or not getattr(janet_brain, "phrase_memory", None):
+        return {
+            "enabled": False,
+            "detail": "Janet brain or PhraseMemory not available",
+        }
+    return janet_brain.phrase_memory.get_stats_dict()
+
+
+@app.post("/api/phrase-memory/entry", response_model=PhraseMemoryUpsertResponse)
+async def api_phrase_memory_upsert(
+    request: PhraseMemoryUpsertRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Add or update a hashed phrase → inject mapping."""
+    if not verify_api_key(authorization):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    global janet_brain
+    if not janet_brain or not getattr(janet_brain, "phrase_memory", None):
+        raise HTTPException(status_code=503, detail="PhraseMemory not available")
+    mode = request.mode.strip().lower()
+    if mode not in ("tail", "full"):
+        raise HTTPException(status_code=400, detail='mode must be "tail" or "full"')
+    key_id = janet_brain.phrase_memory.upsert_entry(
+        mode=mode,
+        pattern=request.pattern,
+        inject=request.inject,
+        confidence=request.confidence,
+    )
+    return PhraseMemoryUpsertResponse(status="ok", key_id=key_id)
+
+
+@app.post("/api/phrase-memory/delete")
+async def api_phrase_memory_delete(
+    request: PhraseMemoryDeleteRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Remove a phrase-memory entry by key_id."""
+    if not verify_api_key(authorization):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    global janet_brain
+    if not janet_brain or not getattr(janet_brain, "phrase_memory", None):
+        raise HTTPException(status_code=503, detail="PhraseMemory not available")
+    if not janet_brain.phrase_memory.delete_entry(request.key_id):
+        raise HTTPException(status_code=404, detail="key_id not found")
+    return {"status": "deleted", "key_id": request.key_id}
 
 
 # Cloud Allowed protocol (JanetXCloud-Double-Soul)
@@ -787,13 +999,12 @@ async def red_thread(authorization: Optional[str] = Header(None)):
     }
 
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for Janet CLI and other real-time clients"""
+async def _websocket_chat_session(websocket: WebSocket):
+    """Shared WebSocket chat loop (OpenAI-style messages, legacy user_message, ping, models)."""
     print(f"🔌 WebSocket connection attempt from {websocket.client}")
     await websocket.accept()
     print(f"🔌 WebSocket client connected and accepted")
-    
+
     try:
         while True:
             # Receive message from client
@@ -869,7 +1080,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_text(json.dumps(response))
                 
                 elif msg_type == 'user_message':
-                    # Legacy format (for iOS app compatibility)
+                    # Legacy format (iOS CallJanet): echoes "id" so client can match pendingRequests
+                    client_msg_id = message.get("id")
                     user_text = message.get('text', '')
                     context_window = message.get('context_window', [])
                     
@@ -881,6 +1093,8 @@ async def websocket_endpoint(websocket: WebSocket):
                             'text': 'Janet brain not available',
                             'timestamp': datetime.now().isoformat()
                         }
+                        if client_msg_id:
+                            response["id"] = client_msg_id
                         await websocket.send_text(json.dumps(response))
                         continue
                     
@@ -904,6 +1118,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         'text': response_text,
                         'timestamp': datetime.now().isoformat()
                     }
+                    if client_msg_id:
+                        response["id"] = client_msg_id
                     await websocket.send_text(json.dumps(response))
                 
                 elif msg_type == 'models':
@@ -967,6 +1183,18 @@ async def websocket_endpoint(websocket: WebSocket):
             pass
 
 
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket chat — same protocol as /ws/chat."""
+    await _websocket_chat_session(websocket)
+
+
+@app.websocket("/ws/chat")
+async def websocket_chat_endpoint(websocket: WebSocket):
+    """Alias for /ws (easier discovery in docs and Postman)."""
+    await _websocket_chat_session(websocket)
+
+
 def initialize_janet_brain():
     """Initialize the global JanetBrain instance"""
     global janet_brain
@@ -1027,6 +1255,7 @@ def main():
     print(f"\nAPI Endpoint: http://{API_HOST}:{API_PORT}/v1/chat/completions")
     print(f"Models Endpoint: http://{API_HOST}:{API_PORT}/v1/models")
     print(f"Health Check: http://{API_HOST}:{API_PORT}/health")
+    print(f"WebSocket chat: ws://<host>:{API_PORT}/ws (alias: /ws/chat)")
     print("\nConfigure Continue.dev with:")
     print(f"  apiBase: http://localhost:{API_PORT}/v1")
     print(f"  apiKey: {API_KEY}")

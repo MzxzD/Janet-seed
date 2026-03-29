@@ -37,6 +37,7 @@ logs/                # Encrypted logs
 *.key                # Encryption keys
 
 # Models & large files
+data/piper/
 models/
 *.gguf
 *.bin

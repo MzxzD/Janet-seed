@@ -11,7 +11,18 @@ else
     PYTHON="$(which python3)"
 fi
 
-# 1. Start API server in background (if not already running)
+# 1. API server — always replace janet_api_server.py so it inherits current LaunchAgent env.
+#    Otherwise a stale nohup child survives menubar/kickstart and never sees new JANET_PIPER_* / TTS keys.
+if pgrep -f "janet_api_server.py" >/dev/null 2>&1; then
+    pkill -f "janet_api_server.py" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+        if ! curl -s http://localhost:8080/health >/dev/null 2>&1; then
+            break
+        fi
+        sleep 0.2
+    done
+fi
+
 if ! curl -s http://localhost:8080/health >/dev/null 2>&1; then
     nohup "$PYTHON" "$JANET_DIR/janet_api_server.py" >> /tmp/janet-api.log 2>> /tmp/janet-api.err &
     sleep 2

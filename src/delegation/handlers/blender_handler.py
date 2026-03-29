@@ -2,7 +2,7 @@
 Blender 3D Modelling Handler
 Delegates 3D modelling tasks to Blender via the MCP addon socket.
 """
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .base import (
     DelegationHandler,
@@ -11,6 +11,7 @@ from .base import (
     HandlerCapability,
 )
 from ..blender_client import BlenderClient
+from ..blender_reference import resolve_blender_action
 
 
 # Simple mapping of common natural language phrases to Blender Python code
@@ -32,7 +33,6 @@ def _query_to_blender_code(user_query: str) -> str:
     for keywords, code in _BLENDER_COMMAND_MAP:
         if any(kw in query_lower for kw in keywords):
             return code
-    # Fallback: add a cube as a simple response to generic 3D requests
     return "import bpy; bpy.ops.mesh.primitive_cube_add(location=(0, 0, 0))"
 
 
@@ -62,16 +62,36 @@ class BlenderHandler(DelegationHandler):
             or request.task_description
             or "add a cube"
         )
-        code = _query_to_blender_code(user_query)
+        kind, info = resolve_blender_action(
+            request.input_data, user_query, request.task_description
+        )
+        if kind == "error":
+            return DelegationResult(
+                success=False,
+                output_data={},
+                message=info.get("error", "Invalid Blender path"),
+                error=info.get("error"),
+                metadata={"user_query": user_query},
+            )
+        if kind == "primitive":
+            code = _query_to_blender_code(user_query)
+        else:
+            code = info["code"]
 
         try:
             result = self.client.execute_code(code)
             result_str = str(result.get("result", result)) if result else "Done"
+            meta: Dict[str, Any] = {
+                "user_query": user_query,
+                "blender_action": kind,
+            }
+            if info.get("path"):
+                meta["path"] = info["path"]
             return DelegationResult(
                 success=True,
                 output_data={"result": result, "executed_code": code},
-                message=f"Blender executed: {result_str}",
-                metadata={"user_query": user_query},
+                message=f"Blender executed ({kind}): {result_str}",
+                metadata=meta,
             )
         except Exception as e:
             return DelegationResult(
@@ -83,4 +103,4 @@ class BlenderHandler(DelegationHandler):
 
     def is_available(self) -> bool:
         """Check if Blender addon is available."""
-        return self.client.is_available()
+        return self.client.is_available(            )
